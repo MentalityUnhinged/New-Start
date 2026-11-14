@@ -46,6 +46,15 @@ Multi-monitor selection, mixed-DPI transitions, display reconnection, sleep/resu
 
 Assess supported alternatives for tray hosting, badges, task progress and previews. Do not promise parity where public Windows APIs cannot supply it. Keep adapters read-only and isolate Windows-version compatibility changes.
 
-## Possible future visible replacement
+## Planned: optional Windows taskbar and Start suppression
 
-Taskbar suppression remains disabled. A separately validated recovery process, original-state journal, process identity/heartbeat checks and crash/hang/session/Explorer-restart restoration would be required before considering an opt-in visible replacement.
+Add separate, explicit settings to **hide the Windows taskbar while New Start runs** and **use New Start instead of Windows Start**. Both remain off by default and are not implemented in the current beta. They should work with the dock alone or with the optional application bar.
+
+- Research reversible taskbar suppression across primary/secondary displays and Explorer restarts. Hiding a window and releasing its reserved work area are separate requirements; verify both rather than assuming one implies the other.
+- Investigate redirecting standalone Windows-key and Ctrl+Esc activation to New Start, while preserving unrelated Windows-key shortcuts. Suppress normal Windows Start entry points only where reliably supported; do not promise a universal OS-level disable switch.
+- Keep Explorer, desktop/file management and Windows Start components installed and running. Do not terminate StartMenuExperienceHost, uninstall shell components or change the system shell as an ordinary preference.
+- Restore the original taskbar visibility, work-area behaviour and input handling when the option is turned off, New Start exits, or its recovery process detects a crash/hang. Preserve preference changes the user makes during the session instead of blindly overwriting them with an old snapshot.
+- Require a separate tested recovery executable, durable original-state journal, PID/start-time validation and heartbeat before suppression can be enabled. If recovery cannot start or remain healthy, leave Windows UI available. Provide an independent emergency restore command and prevent repeated crash/re-enable loops.
+- Validate startup, exit, crash, hang, recovery failure, Explorer restart, lock/unlock, display/DPI changes and sleep/resume. Keep secure-system shortcuts and a way to launch Task Manager available. No keyboard-content logging is needed for Start-key redirection.
+
+Research boundaries: [low-level keyboard hooks](https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc) can be removed by Windows after a timeout, so interception needs failure/fallback testing. [Shell Launcher](https://learn.microsoft.com/en-us/windows/configuration/shell-launcher/) is a separate managed-device shell-replacement feature with edition/deployment requirements, not a drop-in preference for this desktop beta. Isolate any Explorer compatibility adapter and document tested Windows versions.
