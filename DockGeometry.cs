@@ -6,6 +6,7 @@ public enum DockEdge { Bottom, Top, Left }
 public enum DockAlignment { Start, Centre, End }
 internal static class DockGeometry
 {
+    internal const double WindowClearance=8;
     internal static double Aligned(double origin,double length,double size,DockAlignment alignment)
     {
         double offset=alignment switch{DockAlignment.Start=>8,DockAlignment.End=>length-size-8,_=>(length-size)/2};

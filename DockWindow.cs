@@ -31,6 +31,7 @@ public sealed class DockWindow : Window
     Button? startButton;
     readonly List<(string Path,Button Button)> pinButtons=new();
     bool dragging;DateTime suppressClickUntil;
+    bool positionQueued;
     [StructLayout(LayoutKind.Sequential)]struct CursorPoint{public int X,Y;}
     [DllImport("user32.dll")]static extern bool GetCursorPos(out CursorPoint point);
     DateTime startClosed;
@@ -124,11 +125,19 @@ public sealed class DockWindow : Window
             startMenu.Prepare();
         };
         SizeChanged+=(_,_)=>Position();
+        // Windows can move a window after an AppBar work-area change. Restore
+        // the edge-relative position after that notification has settled.
+        LocationChanged+=(_,_)=>QueuePosition();
         timer.Tick+=(_,_)=>{ Refresh(); Position(); clock.Text=DateTime.Now.ToString("t"); _=StartCatalog.Refresh();RecycleBinIcon.Refresh();TaskbarPins.Refresh(); };
         Closed+=(_,_)=>{ timer.Stop(); tray.IsOpen=false; startMenu?.Close();RecycleBinIcon.Changed-=RecycleChanged;reservation?.Dispose(); };
         PreviewKeyDown+=(_,e)=>{if(e.Key==Key.Escape&&!dragging){tray.IsOpen=false;startMenu?.Dismiss();e.Handled=true;}};
     }
     void RecycleChanged()=>Dispatcher.BeginInvoke(new Action(()=>recycleImage.Source=RecycleBinIcon.Current));
+    void QueuePosition()
+    {
+        if(positionQueued||!IsLoaded||Dispatcher.HasShutdownStarted)return;positionQueued=true;
+        Dispatcher.BeginInvoke(new Action(()=>{positionQueued=false;if(IsLoaded)Position();}),DispatcherPriority.ContextIdle);
+    }
     internal async System.Threading.Tasks.Task VerifyMenuPerformance()
     {
         Button? button=null;
@@ -138,7 +147,7 @@ public sealed class DockWindow : Window
     }
     internal async System.Threading.Tasks.Task VerifyLocations()
     {
-        var checks=LocationValidation.Geometry();var originalEdge=prefs.Edge;var originalAlignment=prefs.Alignment;bool originalReserve=prefs.ReserveDockSpace;
+        var checks=LocationValidation.Geometry();var clearances=new Dictionary<string,double>();var originalEdge=prefs.Edge;var originalAlignment=prefs.Alignment;bool originalReserve=prefs.ReserveDockSpace;
         try
         {
             prefs.ReserveDockSpace=false;Position();await System.Threading.Tasks.Task.Delay(200);var baseline=DockReservation.WorkArea;
@@ -154,11 +163,17 @@ public sealed class DockWindow : Window
                 bool centred=edge==DockEdge.Left||alignment!=DockAlignment.Centre||Math.Abs(menu.Left+menu.Width/2-(SystemParameters.WorkArea.Left+SystemParameters.WorkArea.Width/2))<1;
                 if(edge==DockEdge.Left&&alignment==DockAlignment.Centre)centred=Math.Abs(menu.Top+menu.Height/2-(Top+ActualHeight/2))<1;
                 checks[$"Live{edge}{alignment}"]=reserve&&side&&centred&&SystemParameters.WorkArea.Contains(menu);
+                var dpi=VisualTreeHelper.GetDpi(this);
+                double clearance=edge switch{DockEdge.Top=>area.Top/dpi.DpiScaleY-anchor.Bottom,DockEdge.Left=>area.Left/dpi.DpiScaleX-anchor.Right,_=>anchor.Top-area.Bottom/dpi.DpiScaleY};
+                double pixel=1/(edge==DockEdge.Left?dpi.DpiScaleX:dpi.DpiScaleY);
+                clearances[$"{edge}{alignment}"]=clearance;
+                checks[$"Clearance{edge}{alignment}"]=clearance>=DockGeometry.WindowClearance-.01&&clearance<=DockGeometry.WindowClearance+pixel;
                 startMenu.Dismiss();
             }
         }
         finally{prefs.Edge=originalEdge;prefs.Alignment=originalAlignment;prefs.ReserveDockSpace=originalReserve;Refresh(true);UpdateLayout();Position();}
         File.WriteAllText(System.IO.Path.Combine(Preferences.Folder,"location-verification.json"),System.Text.Json.JsonSerializer.Serialize(checks,new System.Text.Json.JsonSerializerOptions{WriteIndented=true}));
+        File.WriteAllText(System.IO.Path.Combine(Preferences.Folder,"location-clearance-verification.json"),System.Text.Json.JsonSerializer.Serialize(clearances));
         Close();
     }
     void Separator(string name)
@@ -173,13 +188,14 @@ public sealed class DockWindow : Window
         // The icon is centred inside its hit target. Reserve to its normal visible top,
         // not the larger transparent window used for hover/bounce animation.
         double iconButtonHeight=prefs.IconSize*1.75+12;
-        double visibleDockHeight=4+iconButtonHeight/2+prefs.IconSize/2+2;
+        double dockThickness=4+iconButtonHeight/2+prefs.IconSize/2;
+        double reservedThickness=dockThickness+DockGeometry.WindowClearance;
         bool vertical=prefs.Edge==DockEdge.Left;
-        double hitThickness=visibleDockHeight-4;
+        double hitThickness=dockThickness-4+2;
         blankSurface.Height=vertical?double.NaN:hitThickness;blankSurface.Width=vertical?hitThickness:double.NaN;
         blankSurface.VerticalAlignment=prefs.Edge==DockEdge.Top?VerticalAlignment.Top:vertical?VerticalAlignment.Stretch:VerticalAlignment.Bottom;
         blankSurface.HorizontalAlignment=vertical?HorizontalAlignment.Left:HorizontalAlignment.Stretch;
-        reservation?.Update(prefs.ReserveDockSpace,visibleDockHeight,prefs.Edge);
+        reservation?.Update(prefs.ReserveDockSpace,reservedThickness,prefs.Edge);
         Rect area;
         if(reservation is {Enabled:true} bar&&bar.Bounds.Bottom>bar.Bounds.Top)
         {
