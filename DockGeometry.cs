@@ -8,15 +8,16 @@ internal static class DockGeometry
 {
     internal const double WindowClearance=8;
     internal const double ScreenClearance=8;
+    internal const double BackgroundPadding=6;
     internal static double Aligned(double origin,double length,double size,DockAlignment alignment)
     {
         double offset=alignment switch{DockAlignment.Start=>8,DockAlignment.End=>length-size-8,_=>(length-size)/2};
         return origin+Math.Clamp(offset,0,Math.Max(0,length-size));
     }
-    internal static Point DockOrigin(Rect area,Size size,DockEdge edge,DockAlignment alignment,double iconSize=36)
+    internal static Point DockOrigin(Rect area,Size size,DockEdge edge,DockAlignment alignment,double iconSize=36,double backgroundPadding=0)
     {
         // Align the visible icon, excluding transparent button/animation padding.
-        double inset=ScreenClearance-(iconSize*1.75+12-iconSize)/2;
+        double inset=ScreenClearance+backgroundPadding-(iconSize*1.75+12-iconSize)/2;
         return edge switch
         {
             DockEdge.Top=>new(Aligned(area.Left,area.Width,size.Width,alignment),area.Top+inset),

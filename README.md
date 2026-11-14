@@ -11,6 +11,7 @@ New Start is an experimental native Windows 11 dock and custom Start menu, built
 ## Features
 
 - Transparent dock with a white hollow-circle Start button, running indicators and separate pinned/running application sections.
+- Optional macOS-style glass dock background, off by default, following Light/Dark/System and the existing transparency/blur sliders. See [appearance details](docs/DOCK-BACKGROUND.md).
 - Top, left or bottom placement. Bottom centre is the default for a new installation.
 - Left/centre/right alignment on horizontal edges; top/centre/bottom alignment on the left edge.
 - Start opens below a top dock, above a bottom dock, or beside a left dock. Top-centre and bottom-centre Start are centred horizontally on the screen; left-centre Start is vertically centred on the dock. Other layouts follow the Start button and stay within the work area.
@@ -19,6 +20,7 @@ New Start is an experimental native Windows 11 dock and custom Start menu, built
 - Drag to pin, reorder or remove apps. Imported Windows taskbar pins are read-only and can be hidden locally.
 - Application menus with launch, pin/unpin, close and supported automatic Recent destinations.
 - Custom Start with Windows-synchronised pins, 6 × 6 sections, whole-page scrolling and conditional page pips; alphabetical All Apps and app search. No recent apps/files section in Start.
+- Right-click Start apps to pin them to the dock or pin/unpin them in New Start. Local Start changes persist without editing Windows Start pins; removed apps remain available in All Apps/search.
 - Light/Dark/System appearance, adjustable menu transparency and blur, optional clock, system controls, Task View and Show Desktop, plus the Windows Recycle Bin with live empty/full icons and an Empty action using Windows confirmation.
 - Account display name/avatar and standard folder/settings shortcuts, resolved locally at runtime.
 
@@ -67,7 +69,7 @@ Right-click blank dock space → **New Start settings**. Select the dock edge an
 | Placement and screen reservation | `DockGeometry.cs`, `DockReservation.cs` |
 | Start and app discovery | `StartMenuWindow.cs`, `StartCatalog.cs` |
 | Native integration | `Native.cs`, `TaskbarPins.cs`, `PinIdentity.cs`, `JumpListReader.cs` |
-| Appearance and blur | `Appearance.cs`, `ThemedMenus.cs`, `CustomBackdrop.cs`, `native/Backdrop.cpp` |
+| Appearance and blur | `Appearance.cs`, `ThemedMenus.cs`, `CustomBackdrop.cs`, `DockGlass.cs`, `native/Backdrop.cpp` |
 | Local account/folder/Recycle Bin adapters | `AccountIdentity.cs`, `StartShortcuts.cs`, `RecycleBinIcon.cs` |
 | Defaults and persistence | `Preferences.cs` |
 | Original branding | `assets/logo.svg`, `assets/Generate-Icon.ps1` |

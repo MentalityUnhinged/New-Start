@@ -61,7 +61,7 @@ internal static class ThemedMenus
             foreach(var item in menu.Items)if(item is MenuItem entry&&entry.Icon==null)
             {
                 string label=entry.Header?.ToString()??"";
-                string glyph=label switch{"Pin" or "Pin to taskbar"=>"\uE718","Unpin" or "Unpin from taskbar" or "Hide from New Start"=>"\uE77A","Close window" or "Close all windows"=>"\uE8BB","Task Manager"=>"\uE9D9","Taskbar settings" or "New Start settings"=>"\uE713","Launch new instance"=>"\uE768","Move left"=>"\uE72B","Move right"=>"\uE72A","Open Recycle Bin"=>"\uE8E5","Lock"=>"\uE72E","Restart"=>"\uE777","Shut down"=>"\uE7E8","Cut"=>"\uE8C6","Copy"=>"\uE8C8","Paste"=>"\uE77F","Select all"=>"\uE8B3",_=>"\uE737"};
+                string glyph=label switch{"Pin" or "Pin to taskbar" or "Pin to dock" or "Pin to Start" or "Already pinned to dock"=>"\uE718","Unpin" or "Unpin from taskbar" or "Unpin from Start" or "Hide from New Start"=>"\uE77A","Close window" or "Close all windows"=>"\uE8BB","Task Manager"=>"\uE9D9","Taskbar settings" or "New Start settings"=>"\uE713","Launch new instance"=>"\uE768","Move left"=>"\uE72B","Move right"=>"\uE72A","Open Recycle Bin"=>"\uE8E5","Lock"=>"\uE72E","Restart"=>"\uE777","Shut down"=>"\uE7E8","Cut"=>"\uE8C6","Copy"=>"\uE8C8","Paste"=>"\uE77F","Select all"=>"\uE8B3",_=>"\uE737"};
                 entry.Icon=new TextBlock{Text=glyph,FontFamily=new FontFamily("Segoe Fluent Icons"),FontSize=15,VerticalAlignment=VerticalAlignment.Center};
             }
         };

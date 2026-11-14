@@ -13,6 +13,7 @@
 #include <winrt/Windows.UI.Composition.Desktop.h>
 #include <memory>
 #include <vector>
+#include <cmath>
 
 using namespace winrt;
 using namespace Windows::Foundation;
@@ -53,6 +54,7 @@ struct CompositionServices
 struct Backdrop
 {
     HWND owner,hwnd{};Compositor compositor{nullptr};DesktopWindowTarget target{nullptr};SpriteVisual sprite{nullptr};CompositionEffectBrush brush{nullptr};CompositionRoundedRectangleGeometry rounded{nullptr};
+    bool regional=false;float regionX{},regionY{},regionWidth{},regionHeight{},cornerRadius=8.f;
     Backdrop(HWND window):owner(window)
     {
         // These two bounded UI-thread services live until process termination.
@@ -92,9 +94,11 @@ struct Backdrop
         BOOL enabled=TRUE;check_hresult(DwmSetWindowAttribute(hwnd,DWMWA_USE_HOSTBACKDROPBRUSH,&enabled,sizeof(enabled)));
         int none=1;check_hresult(DwmSetWindowAttribute(hwnd,DWMWA_SYSTEMBACKDROP_TYPE,&none,sizeof(none)));
         RECT placement{};GetWindowRect(owner,&placement);
+        float scale=GetDpiForWindow(owner)/96.f;
+        if(regional){placement.left+=LONG(std::lround(regionX*scale));placement.top+=LONG(std::lround(regionY*scale));placement.right=placement.left+LONG(std::lround(regionWidth*scale));placement.bottom=placement.top+LONG(std::lround(regionHeight*scale));}
         SetWindowPos(hwnd,owner,placement.left,placement.top,placement.right-placement.left,placement.bottom-placement.top,SWP_NOACTIVATE|SWP_NOOWNERZORDER|SWP_SHOWWINDOW);
-        RECT rect{};GetClientRect(hwnd,&rect);float scale=GetDpiForWindow(owner)/96.f;
-        Windows::Foundation::Numerics::float2 size{float(rect.right),float(rect.bottom)};sprite.Size(size);rounded.Size(size);rounded.CornerRadius({8.f*scale,8.f*scale});
+        RECT rect{};GetClientRect(hwnd,&rect);
+        Windows::Foundation::Numerics::float2 size{float(rect.right),float(rect.bottom)};sprite.Size(size);rounded.Size(size);rounded.CornerRadius({cornerRadius*scale,cornerRadius*scale});
         brush.Properties().InsertScalar(L"Blur.BlurAmount",radius*scale);
     }
 };
@@ -103,6 +107,8 @@ extern "C" __declspec(dllexport) HRESULT __stdcall CreateBackdrop(HWND hwnd,floa
 extern "C" __declspec(dllexport) HRESULT __stdcall UpdateBackdrop(void* state,float radius,BOOL visible) noexcept
 {try{static_cast<Backdrop*>(state)->Update(radius,visible!=FALSE);return S_OK;}catch(...){return to_hresult();}}
 extern "C" __declspec(dllexport) BOOL __stdcall IsBackdropVisible(void* state) noexcept{return state&&IsWindowVisible(static_cast<Backdrop*>(state)->hwnd);}
+extern "C" __declspec(dllexport) HRESULT __stdcall UpdateBackdropRegion(void* state,float x,float y,float width,float height,float corner,float radius,BOOL visible) noexcept
+{try{auto backdrop=static_cast<Backdrop*>(state);backdrop->regional=true;backdrop->regionX=x;backdrop->regionY=y;backdrop->regionWidth=width;backdrop->regionHeight=height;backdrop->cornerRadius=corner;backdrop->Update(radius,visible!=FALSE&&width>0&&height>0);return S_OK;}catch(...){return to_hresult();}}
 extern "C" __declspec(dllexport) HRESULT __stdcall RebindBackdrop(void* state,HWND owner,float radius,BOOL visible) noexcept
 {try{auto backdrop=static_cast<Backdrop*>(state);backdrop->owner=owner;backdrop->Update(radius,visible!=FALSE);return S_OK;}catch(...){return to_hresult();}}
 extern "C" __declspec(dllexport) void __stdcall DestroyBackdrop(void* state) noexcept{delete static_cast<Backdrop*>(state);}

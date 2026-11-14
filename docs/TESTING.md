@@ -7,11 +7,15 @@ Build on Windows with `./build.ps1`. Close an existing New Start instance before
 | `--verify-audit` | Invalid preferences, concurrent icon/recent requests, shared styles | Writes a report and exits |
 | `--verify-pin-model` | Synthetic pin insertion/order/hide/restore/serialization | Writes a report and exits; no Windows pin edits |
 | `--verify-locations` | Nine edge/alignment combinations, menu bounds, native reservation, top-centre centring, default/fallback geometry | Temporarily moves dock, restores in-memory settings and exits |
+| `--verify-dock-glass` | Default off, light/dark on three edges, tray clearance, transparency/blur combinations, disabled surface cleanup | Temporarily changes in-memory settings, restores and exits |
+| `--start-actions-preview` | Interactive Start pin/unpin acceptance | Keeps Start open despite automation activation; real local preference changes persist |
 | `--verify-start` | Prepared Start frame, icons, power bounds, task layout | Leaves preview running |
 | `--verify-backdrop` | Repeated open/hide, no orphan surface, zero blur | Leaves preview running |
 | `--verify-menu-performance` | Idle/menu CPU, zero blur comparison, recent duplication, handle counts over reopen cycles | Temporarily changes blur in memory, restores and exits |
 
 Reports are local under `%LOCALAPPDATA%/NewStart`, not source artifacts. Rendering/desktop tests need an interactive Windows session. CI is a compilation gate; it does not validate native screen reservation or visual behaviour.
+
+Start context actions were checked by pinning Microsoft Store to the dock, verifying duplicate pin prevention, unpinning it from New Start, restarting, and pinning it back through search. The test dock pin was removed afterward. Windows Start pin storage was not modified. Start actions use the shared themed context menus and local preferences; All Apps/search remain available after unpinning.
 
 Placement validation passed all geometry/default/fallback checks and all nine live edge/alignment checks on the development display. Release compilation passed with no warnings/errors. Earlier audit checks covered pin persistence, shared caches/styles, native shutdown and backdrop dismissal. These do not establish full driver, display, accessibility or long-duration coverage.
 

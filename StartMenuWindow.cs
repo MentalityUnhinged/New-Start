@@ -29,7 +29,7 @@ internal sealed class StartMenuWindow : Window
     StartData? data;bool allApps;int page;bool modalOpen;
     bool? lastDark;
     bool lastHighContrast;
-    bool draggingApp;DateTime suppressLaunchUntil;
+    bool draggingApp;bool appContextOpen;DateTime suppressLaunchUntil;
     readonly Button powerButton;
     readonly FrameworkElement powerVisual;
     internal bool PowerIconFits
@@ -41,6 +41,8 @@ internal sealed class StartMenuWindow : Window
         }
     }
     internal event Action? Dismissed;
+    internal DockWindow? DockHost {get;set;}
+    internal bool KeepOpenForTesting {get;set;}
     internal void Prepare()
     {
         new System.Windows.Interop.WindowInteropHelper(this).EnsureHandle();
@@ -54,13 +56,13 @@ internal sealed class StartMenuWindow : Window
     internal void Reposition()
     {
         var work=SystemParameters.WorkArea;
-        Rect bounds=Owner is DockWindow dock?DockGeometry.MenuBounds(work,dock.StartAnchor,prefs.Edge,prefs.Alignment,new Rect(dock.Left,dock.Top,dock.ActualWidth,dock.ActualHeight)):new Rect(work.Left+(work.Width-Math.Min(640,work.Width-24))/2,work.Top+12,Math.Min(640,work.Width-24),Math.Min(660,work.Height-24));
+        Rect bounds=(DockHost??Owner) is DockWindow dock?DockGeometry.MenuBounds(work,dock.StartAnchor,prefs.Edge,prefs.Alignment,new Rect(dock.Left,dock.Top,dock.ActualWidth,dock.ActualHeight)):new Rect(work.Left+(work.Width-Math.Min(640,work.Width-24))/2,work.Top+12,Math.Min(640,work.Width-24),Math.Min(660,work.Height-24));
         Width=bounds.Width;Height=bounds.Height;Left=bounds.Left;Top=bounds.Top;
     }
     internal void Dismiss()
     {
         if(!IsVisible)return;
-        if(Owner==null){Close();return;}
+        if(Owner==null&&DockHost==null){Close();return;}
         CustomBackdrop.Hide(this);Hide();Dismissed?.Invoke();allApps=false;page=0;search.Clear();data=StartCatalog.Current;Render();
     }
     internal StartMenuWindow(Preferences preferences,bool sectionPreview=false)
@@ -148,7 +150,7 @@ internal sealed class StartMenuWindow : Window
             if(pinnedView&&e.Key is Key.PageDown or Key.PageUp){GoSection(page+(e.Key==Key.PageDown?1:-1));e.Handled=true;return;}
             if(e.Key==Key.Escape){if(search.Text.Length>0)search.Clear();else if(allApps){allApps=false;Render();}else Dismiss();e.Handled=true;}
         };
-        Deactivated+=(_,_)=>{if(IsVisible&&!modalOpen&&!sectionPreview&&!draggingApp)Dismiss();};
+        Deactivated+=(_,_)=>{if(IsVisible&&!modalOpen&&!appContextOpen&&!sectionPreview&&!KeepOpenForTesting&&!draggingApp)Dismiss();};
         SourceInitialized+=(_,_)=>UpdateAppearance();
         data=StartCatalog.Current;if(sectionPreview&&data!=null)data=data with{Pins=data.Apps.Take(73).ToList()};if(data!=null)Render();
         void CatalogUpdated()=>Dispatcher.BeginInvoke(new Action(()=>{
@@ -186,6 +188,22 @@ internal sealed class StartMenuWindow : Window
     static void Add(ContextMenu menu,string name,Action action){var i=new MenuItem{Header=name};i.Click+=(_,_)=>action();menu.Items.Add(i);}
     void Power(string verb,string arguments){modalOpen=true;try{if(MessageBox.Show(this,"Do you want to "+verb+" this PC?","Power",MessageBoxButton.YesNo)==MessageBoxResult.Yes){Process.Start(new ProcessStartInfo("shutdown.exe",arguments){UseShellExecute=false,CreateNoWindow=true});Dismiss();}}finally{modalOpen=false;}}
     void Launch(string target){try{Process.Start(new ProcessStartInfo(target){UseShellExecute=true});Dismiss();}catch(Exception e){modalOpen=true;try{MessageBox.Show(this,e.Message,"Could not open app");}finally{modalOpen=false;}}}
+    static bool SameApp(string left,string right)=>string.Equals(PinIdentity.Resolve(left),PinIdentity.Resolve(right),StringComparison.OrdinalIgnoreCase);
+    List<StartApp> VisiblePins()
+    {
+        if(data==null)return new();
+        return data.Pins.Concat(prefs.StartPins.Select(target=>data.Apps.FirstOrDefault(app=>SameApp(app.Target,target))).OfType<StartApp>())
+            .Where(app=>!prefs.HiddenStartPins.Any(target=>SameApp(target,app.Target)))
+            .DistinctBy(app=>PinIdentity.Resolve(app.Target),StringComparer.OrdinalIgnoreCase).ToList();
+    }
+    void SetStartPin(StartApp app,bool pinned)
+    {
+        prefs.StartPins.RemoveAll(target=>SameApp(target,app.Target));
+        prefs.HiddenStartPins.RemoveAll(target=>SameApp(target,app.Target));
+        if(pinned){if(data?.Pins.Any(pin=>SameApp(pin.Target,app.Target))!=true)prefs.StartPins.Add(app.Target);}
+        else prefs.HiddenStartPins.Add(app.Target);
+        prefs.Save();Dispatcher.BeginInvoke(new Action(Render));
+    }
     Button AppButton(StartApp app,bool tile)
     {
         var panel=new StackPanel{Orientation=tile?Orientation.Vertical:Orientation.Horizontal};
@@ -200,6 +218,21 @@ internal sealed class StartMenuWindow : Window
         var template=new ControlTemplate(typeof(Button)){VisualTree=border};
         foreach(var property in new[]{Button.IsMouseOverProperty,Button.IsKeyboardFocusedProperty}){var trigger=new Trigger{Property=property,Value=true};trigger.Setters.Add(new Setter(Border.BackgroundProperty,new SolidColorBrush(Color.FromArgb(28,128,128,128)),"Tile"));template.Triggers.Add(trigger);}b.Template=template;
         System.Windows.Automation.AutomationProperties.SetName(b,app.Name);b.Click+=(_,_)=>{if(DateTime.UtcNow>=suppressLaunchUntil)Launch(app.Target);};
+        var context=ThemedMenus.Create(prefs);
+        b.ContextMenu=context;
+        context.Opened+=(_,_)=>appContextOpen=true;
+        context.Closed+=(_,_)=>appContextOpen=false;
+        b.ContextMenuOpening+=(_,_)=>{
+            context.Items.Clear();
+            if((DockHost??Owner) is DockWindow dock)
+            {
+                bool dockPinned=dock.IsDockPinned(app.Target);
+                var pin=new MenuItem{Header=dockPinned?"Already pinned to dock":"Pin to dock",IsEnabled=!dockPinned};
+                pin.Click+=(_,_)=>dock.PinFromStart(app.Target);context.Items.Add(pin);
+            }
+            bool startPinned=VisiblePins().Any(pin=>SameApp(pin.Target,app.Target));
+            Add(context,startPinned?"Unpin from Start":"Pin to Start",()=>SetStartPin(app,!startPinned));
+        };
         Point origin=default;bool pressed=false;
         b.PreviewMouseLeftButtonDown+=(_,e)=>{origin=e.GetPosition(b);pressed=true;};b.PreviewMouseLeftButtonUp+=(_,_)=>pressed=false;
         b.PreviewMouseMove+=(_,e)=>{
@@ -236,17 +269,18 @@ internal sealed class StartMenuWindow : Window
         else
         {
             const int columns=6,rows=6,pageSize=columns*rows;
-            body.Margin=new Thickness(30,0,30,0);int pages=Math.Max(1,(data.Pins.Count+pageSize-1)/pageSize);page=0;
+            var pins=VisiblePins();
+            body.Margin=new Thickness(30,0,30,0);int pages=Math.Max(1,(pins.Count+pageSize-1)/pageSize);page=0;
             sectionPips.Visibility=pages>1?Visibility.Visible:Visibility.Collapsed;
             for(int section=0;section<pages;section++)
             {
                 var grid=new UniformGrid{Columns=columns,Rows=rows,Height=sectionHeight};
-                foreach(var app in data.Pins.Skip(section*pageSize).Take(pageSize))grid.Children.Add(AppButton(app,true));
+                foreach(var app in pins.Skip(section*pageSize).Take(pageSize))grid.Children.Add(AppButton(app,true));
                 pinnedSections.Add(grid);body.Children.Add(grid);
                 var dot=new Ellipse{Width=section==0?8:4,Height=section==0?8:4,Opacity=section==0?1:.55,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};dot.SetResourceReference(Shape.FillProperty,"Text");pipDots.Add(dot);
                 int selected=section;var button=new Button{Content=dot,Width=26,Height=28,Padding=new Thickness(0),ToolTip=$"Pinned section {section+1}"};Borderless(button);System.Windows.Automation.AutomationProperties.SetName(button,$"Pinned section {section+1}");button.Click+=(_,_)=>GoSection(selected);sectionPips.Children.Add(button);
             }
-            if(data.Pins.Count==0)body.Children.Add(new TextBlock{Text="No Windows Start pins available.",Margin=new Thickness(18)});
+            if(pins.Count==0)body.Children.Add(new TextBlock{Text="No pinned apps. Right-click an app in All apps to pin it here.",Margin=new Thickness(18)});
             SizeSections();
         }
     }

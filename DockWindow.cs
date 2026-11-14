@@ -30,6 +30,8 @@ public sealed class DockWindow : Window
     MenuItem? emptyRecycleItem;
     readonly DockPins dockPins;
     readonly Grid dockSurface=new();
+    readonly DockGlass dockGlass=new();
+    Brush dockInk=Brushes.White;Color? lastInk;
     readonly Border blankSurface=new(){Background=new SolidColorBrush(Color.FromArgb(1,0,0,0)),VerticalAlignment=VerticalAlignment.Bottom};
     Button? startButton;
     readonly List<(string Path,Button Button)> pinButtons=new();
@@ -94,6 +96,9 @@ public sealed class DockWindow : Window
             return new{PinnedAppFirst=pinnedFirst,RunningPinNotDuplicated=unique,RunningSeparatorPresent=separator,RecycleBinLast=recycleLast};
         }finally{prefs.Pins=original;prefs.FollowWindowsTaskbarPins=originalFollow;Refresh(true);}
     }
+    // Automation activates the dock's root owner before input. This preview
+    // exposes Start independently and avoids that activation dismissing it.
+    internal void PreviewStartActions(){startMenu!.KeepOpenForTesting=true;startMenu.Owner=null;startMenu.ShowInTaskbar=true;startMenu.OpenMenu();}
     internal async System.Threading.Tasks.Task VerifyStart()
     {
         await StartCatalog.Refresh();
@@ -134,7 +139,7 @@ public sealed class DockWindow : Window
         Title="New Start"; WindowStyle=WindowStyle.None; AllowsTransparency=true; Background=Brushes.Transparent;
         ResizeMode=ResizeMode.NoResize; ShowInTaskbar=false; Topmost=true; ShowActivated=false;
         SizeToContent=SizeToContent.Width; Height=90;
-        dockSurface.Children.Add(blankSurface);dockSurface.Children.Add(row);Content=dockSurface;
+        dockSurface.Children.Add(dockGlass.Surface);dockSurface.Children.Add(blankSurface);dockSurface.Children.Add(row);Content=dockSurface;
         var barMenu=ThemedMenus.Create(prefs);
         Add(barMenu,"Task Manager",()=>Launch("taskmgr.exe"));
         Add(barMenu,"Taskbar settings",()=>Launch("ms-settings:taskbar"));
@@ -147,7 +152,7 @@ public sealed class DockWindow : Window
             Refresh(); Position();
             reservation=new DockReservation(this);reservation.Changed+=Position;
             Position();timer.Start();
-            startMenu=new StartMenuWindow(prefs){Owner=this};
+            startMenu=new StartMenuWindow(prefs){Owner=this,DockHost=this};
             startMenu.Dismissed+=()=>startClosed=DateTime.UtcNow;
             startMenu.Prepare();
         };
@@ -156,7 +161,7 @@ public sealed class DockWindow : Window
         // the edge-relative position after that notification has settled.
         LocationChanged+=(_,_)=>QueuePosition();
         timer.Tick+=(_,_)=>{ Refresh(); Position(); clock.Text=DateTime.Now.ToString(prefs.Edge==DockEdge.Left?"HH\nmm":"t"); _=StartCatalog.Refresh();RecycleBinIcon.Refresh();TaskbarPins.Refresh(); };
-        Closed+=(_,_)=>{ timer.Stop(); tray.IsOpen=false; startMenu?.Close();recycleWatcher?.Dispose();RecycleBinIcon.Changed-=RecycleChanged;reservation?.Dispose(); };
+        Closed+=(_,_)=>{ timer.Stop(); tray.IsOpen=false; startMenu?.Close();dockGlass.Dispose();recycleWatcher?.Dispose();RecycleBinIcon.Changed-=RecycleChanged;reservation?.Dispose(); };
         PreviewKeyDown+=(_,e)=>{if(e.Key==Key.Escape&&!dragging){controlsKeyboardDismiss=tray.IsOpen;tray.IsOpen=false;controlsDismissedByIcon=false;startMenu?.Dismiss();e.Handled=true;}};
     }
     void RecycleChanged()
@@ -214,6 +219,39 @@ public sealed class DockWindow : Window
         File.WriteAllText(System.IO.Path.Combine(Preferences.Folder,"location-clearance-verification.json"),System.Text.Json.JsonSerializer.Serialize(clearances));
         Close();
     }
+    internal async System.Threading.Tasks.Task VerifyDockGlass()
+    {
+        var checks=new Dictionary<string,bool>{{"DefaultOff",!new Preferences().DockBackground}};
+        var original=(prefs.DockBackground,prefs.Edge,prefs.Alignment,prefs.Theme,prefs.StartTransparency,prefs.MenuBlur,prefs.ReserveDockSpace);
+        try
+        {
+            prefs.DockBackground=true;prefs.ReserveDockSpace=true;prefs.Alignment=DockAlignment.Centre;
+            foreach(var edge in Enum.GetValues<DockEdge>())foreach(int theme in new[]{1,2})
+            {
+                prefs.Edge=edge;prefs.Theme=theme;Refresh(true);UpdateLayout();Position();await System.Threading.Tasks.Task.Delay(150);UpdateLayout();Position();
+                string key=$"{edge}{(theme==1?"Light":"Dark")}";
+                var bounds=dockGlass.Bounds;var frame=new Rect(Left+bounds.Left,Top+bounds.Top,bounds.Width,bounds.Height);
+                var area=DockReservation.WorkArea;var outer=reservation!.Bounds;var dpi=VisualTreeHelper.GetDpi(this);double pixel=1/dpi.DpiScaleX;
+                double inner=edge switch{DockEdge.Top=>area.Top/dpi.DpiScaleY-frame.Bottom,DockEdge.Left=>area.Left/dpi.DpiScaleX-frame.Right,_=>frame.Top-area.Bottom/dpi.DpiScaleY};
+                double screen=edge switch{DockEdge.Top=>frame.Top-outer.Top/dpi.DpiScaleY,DockEdge.Left=>frame.Left-outer.Left/dpi.DpiScaleX,_=>outer.Bottom/dpi.DpiScaleY-frame.Bottom};
+                checks[key+"Spacing"]=Math.Abs(inner-8)<=pixel&&Math.Abs(screen-8)<=pixel;
+                foreach(double transparency in new[]{0d,.75,1d})foreach(double blur in new[]{0d,20d})
+                {
+                    prefs.StartTransparency=transparency;prefs.MenuBlur=blur;UpdateDockBackground();
+                    bool effects=NativeBackdrop.TransparencyAllowed();
+                    checks[$"{key}T{transparency}B{blur}"]=dockGlass.Surface.IsVisible&&Math.Abs(dockGlass.TintOpacity-(effects?1-transparency:1))<.00001&&dockGlass.NativeVisible==(effects&&blur>0);
+                }
+            }
+            prefs.DockBackground=false;Position();checks["DisabledHasNoSurfaceOrBlur"]=dockGlass.Surface.Visibility==Visibility.Collapsed&&!dockGlass.NativeVisible;
+        }
+        finally
+        {
+            (prefs.DockBackground,prefs.Edge,prefs.Alignment,prefs.Theme,prefs.StartTransparency,prefs.MenuBlur,prefs.ReserveDockSpace)=original;
+            Refresh(true);UpdateLayout();Position();
+        }
+        File.WriteAllText(System.IO.Path.Combine(Preferences.Folder,"dock-glass-verification.json"),System.Text.Json.JsonSerializer.Serialize(checks,new System.Text.Json.JsonSerializerOptions{WriteIndented=true}));
+        Close();
+    }
     void Separator(string name)
     {
         bool vertical=prefs.Edge==DockEdge.Left;
@@ -226,12 +264,14 @@ public sealed class DockWindow : Window
         // The icon is centred inside its hit target. Reserve to its normal visible top,
         // not the larger transparent window used for hover/bounce animation.
         double iconButtonHeight=prefs.IconSize*1.75+12;
-        double reservedThickness=DockGeometry.ScreenClearance+prefs.IconSize+DockGeometry.WindowClearance;
+        double padding=prefs.DockBackground?DockGeometry.BackgroundPadding:0;
+        double reservedThickness=DockGeometry.ScreenClearance+prefs.IconSize+DockGeometry.WindowClearance+2*padding;
         bool vertical=prefs.Edge==DockEdge.Left;
         double hitThickness=prefs.IconSize+4;
         blankSurface.Height=vertical?double.NaN:hitThickness;blankSurface.Width=vertical?hitThickness:double.NaN;
         blankSurface.VerticalAlignment=prefs.Edge==DockEdge.Top?VerticalAlignment.Top:vertical?VerticalAlignment.Stretch:VerticalAlignment.Bottom;
         blankSurface.HorizontalAlignment=vertical?HorizontalAlignment.Left:HorizontalAlignment.Stretch;
+        blankSurface.CornerRadius=new CornerRadius(0);
         double hitInset=(iconButtonHeight-prefs.IconSize)/2-2;
         blankSurface.Margin=prefs.Edge switch{DockEdge.Top=>new Thickness(0,hitInset,0,0),DockEdge.Left=>new Thickness(hitInset,0,0,0),_=>new Thickness(0,0,0,hitInset)};
         reservation?.Update(prefs.ReserveDockSpace,reservedThickness,prefs.Edge);
@@ -242,9 +282,32 @@ public sealed class DockWindow : Window
             area=new Rect(bounds.Left/dpi.DpiScaleX,bounds.Top/dpi.DpiScaleY,(bounds.Right-bounds.Left)/dpi.DpiScaleX,(bounds.Bottom-bounds.Top)/dpi.DpiScaleY);
         }
         else area=SystemParameters.WorkArea;
-        var origin=DockGeometry.DockOrigin(area,new Size(ActualWidth,ActualHeight),prefs.Edge,prefs.Alignment,prefs.IconSize);
+        var origin=DockGeometry.DockOrigin(area,new Size(ActualWidth,ActualHeight),prefs.Edge,prefs.Alignment,prefs.IconSize,padding);
         Left=origin.X;Top=origin.Y;
+        UpdateDockBackground();
         if(startMenu?.IsVisible==true)startMenu.Reposition();
+    }
+    void UpdateDockBackground()
+    {
+        if(!IsLoaded)return;
+        dockInk=DockGlass.Ink(prefs);var colour=((SolidColorBrush)dockInk).Color;
+        if(lastInk!=colour){foreach(var item in row.Children.OfType<DependencyObject>())TintDockItem(item,dockInk);lastInk=colour;}
+        Rect bounds=Rect.Empty;
+        if(prefs.DockBackground&&startButton is {IsLoaded:true}&&row.Children.OfType<Button>().LastOrDefault() is Button last)
+        {
+            var anchor=StartAnchor;var point=last.TranslatePoint(new Point((last.ActualWidth-prefs.IconSize)/2,(last.ActualHeight-prefs.IconSize)/2),this);
+            double padding=DockGeometry.BackgroundPadding;
+            bounds=new Rect(new Point(anchor.Left-Left-padding,anchor.Top-Top-padding),new Point(point.X+prefs.IconSize+padding,point.Y+prefs.IconSize+padding));
+            blankSurface.HorizontalAlignment=HorizontalAlignment.Left;blankSurface.VerticalAlignment=VerticalAlignment.Top;
+            blankSurface.Width=bounds.Width;blankSurface.Height=bounds.Height;blankSurface.Margin=new Thickness(bounds.Left,bounds.Top,0,0);blankSurface.CornerRadius=new CornerRadius(Math.Min(18,Math.Min(bounds.Width,bounds.Height)/2));
+        }
+        dockGlass.Update(this,prefs,bounds);
+    }
+    static void TintDockItem(DependencyObject item,Brush ink)
+    {
+        if(item is Shape shape){if(shape.Stroke!=null)shape.Stroke=ink;if(shape.Fill!=null)shape.Fill=ink;}
+        if(item is TextBlock text)text.Foreground=ink;
+        foreach(var child in LogicalTreeHelper.GetChildren(item).OfType<DependencyObject>())TintDockItem(child,ink);
     }
     internal Rect StartAnchor
     {
@@ -255,14 +318,14 @@ public sealed class DockWindow : Window
         var visual=new Grid{Width=prefs.IconSize,Height=prefs.IconSize,Background=new SolidColorBrush(Color.FromArgb(1,0,0,0)),RenderTransformOrigin=new Point(.5,.5)};
         var scale=new ScaleTransform(1,1); var translate=new TranslateTransform();
         visual.RenderTransform=new TransformGroup{Children=new TransformCollection{scale,translate}};
-        if(content is UIElement element) visual.Children.Add(new Viewbox{Child=element,Stretch=Stretch.Uniform});
+        if(content is UIElement element){TintDockItem(element,dockInk);visual.Children.Add(new Viewbox{Child=element,Stretch=Stretch.Uniform});}
         else visual.Children.Add(new Viewbox
         {
             Stretch=Stretch.Uniform,
             Child=new Grid
             {
                 Width=36,Height=36,
-                Children={new TextBlock{Text=content.ToString(),FontSize=25,Foreground=Brushes.White,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center}}
+                Children={new TextBlock{Text=content.ToString(),FontSize=25,Foreground=dockInk,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center}}
             }
         });
         bool vertical=prefs.Edge==DockEdge.Left;
@@ -299,6 +362,7 @@ public sealed class DockWindow : Window
     {
         if(dragging||(!force&&(tray.IsOpen||row.Children.OfType<Button>().Any(b=>b.ContextMenu?.IsOpen==true))))return;
         windows=Native.Windows();
+        dockInk=DockGlass.Ink(prefs);
         var effectivePins=dockPins.All();
         string next=string.Join("|",windows.Select(w=>$"{w.Handle}:{w.Path}:{w.Title}"))+string.Join("|",effectivePins);
         if(!force&&next==signature)return; signature=next; row.Children.Clear();pinButtons.Clear();
@@ -313,7 +377,7 @@ public sealed class DockWindow : Window
             if(startMenu?.IsVisible==true){startMenu.Dismiss();return;}
             if((DateTime.UtcNow-startClosed).TotalMilliseconds<250)return;
             startMenu?.OpenMenu();
-        });row.Children.Add(startButton);
+        });startButton.Loaded+=(_,_)=>QueuePosition();row.Children.Add(startButton);
         var taskViewIcon=new System.Windows.Shapes.Path
         {
             Data=Geometry.Parse("M 3,7 L 21,7 L 21,29 L 3,29 Z M 26,7 L 33,7 L 33,29 L 26,29 Z"),
@@ -333,7 +397,7 @@ public sealed class DockWindow : Window
             var image=new Image{Source=StartCatalog.CachedIcon(path)};
             image.Loaded+=async(_,_)=>image.Source=await StartCatalog.Icon(path);
             var cell=new Grid{Width=36,Height=36}; cell.Children.Add(image);
-            if(tasks.Count>0&&prefs.Indicators) cell.Children.Add(new Ellipse{Width=4,Height=4,Fill=Brushes.White,VerticalAlignment=VerticalAlignment.Bottom,Margin=new Thickness(0,0,0,-9)});
+            if(tasks.Count>0&&prefs.Indicators) cell.Children.Add(new Ellipse{Width=4,Height=4,Fill=dockInk,VerticalAlignment=VerticalAlignment.Bottom,Margin=new Thickness(0,0,0,prefs.DockBackground?-2:-9)});
             string displayName=StartCatalog.Current?.Apps.FirstOrDefault(a=>string.Equals(a.Target,path,StringComparison.OrdinalIgnoreCase))?.Name??System.IO.Path.GetFileNameWithoutExtension(path);
             var button=MakeIcon(cell,displayName,b=>{
                 if(tasks.Count==0){if(Launch(path)) Bounce(b);}
@@ -368,7 +432,7 @@ public sealed class DockWindow : Window
             if(controlsDismissedByIcon){controlsDismissedByIcon=false;return;}
             BuildTray();tray.Placement=prefs.Edge switch{DockEdge.Top=>PlacementMode.Bottom,DockEdge.Left=>PlacementMode.Right,_=>PlacementMode.Top};tray.PlacementTarget=b;tray.IsOpen=true;
         });controlsButton=expand;row.Children.Add(expand);}
-        if(prefs.Clock==2){clock.MaxWidth=vertical?prefs.IconSize*1.75+12:double.PositiveInfinity;clock.TextWrapping=vertical?TextWrapping.Wrap:TextWrapping.NoWrap;clock.Margin=vertical?new Thickness(2,8,2,8):new Thickness(10);row.Children.Add(clock);}
+        if(prefs.Clock==2){clock.Foreground=dockInk;clock.MaxWidth=vertical?prefs.IconSize*1.75+12:double.PositiveInfinity;clock.TextWrapping=vertical?TextWrapping.Wrap:TextWrapping.NoWrap;clock.Margin=vertical?new Thickness(2,8,2,8):new Thickness(10);row.Children.Add(clock);}
         if(prefs.ShowDesktop)
         {
             var desktop=new Grid{Width=36,Height=36};
@@ -402,6 +466,8 @@ public sealed class DockWindow : Window
         }
         finally{emptyingRecycleBin=false;}
     }
+    internal bool IsDockPinned(string path)=>dockPins.All().Any(pin=>string.Equals(PinIdentity.Resolve(pin),PinIdentity.Resolve(path),StringComparison.OrdinalIgnoreCase));
+    internal void PinFromStart(string path){dockPins.Place(path,dockPins.All().Count);Save();Refresh(true);}
     void MovePin(string path,int delta){dockPins.Move(path,delta);Save();Refresh(true);}
     void AttachPinDrag(Button button,string path,bool pinned)
     {
@@ -493,7 +559,7 @@ public sealed class DockWindow : Window
         DockPanel.SetDock(header,Dock.Top);contents.Children.Add(header);contents.Children.Add(new ScrollViewer{Content=panel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled});
         var themeTimer=new DispatcherTimer{Interval=TimeSpan.FromSeconds(1)};
         bool? lastDark=null;bool lastHighContrast=SystemParameters.HighContrast,lastTransparency=NativeBackdrop.TransparencyAllowed();
-        void ApplyTheme(){bool dark=Appearance.IsDark(prefs.Theme);if(lastDark!=dark||lastHighContrast!=SystemParameters.HighContrast){lastDark=dark;lastHighContrast=SystemParameters.HighContrast;Appearance.Apply(dialog,dark);}lastTransparency=NativeBackdrop.TransparencyAllowed();Appearance.ApplySurface(dialog,settingsFrame,dark,prefs.StartTransparency,prefs.MenuBlur);}
+        void ApplyTheme(){bool dark=Appearance.IsDark(prefs.Theme);if(lastDark!=dark||lastHighContrast!=SystemParameters.HighContrast){lastDark=dark;lastHighContrast=SystemParameters.HighContrast;Appearance.Apply(dialog,dark);}lastTransparency=NativeBackdrop.TransparencyAllowed();Appearance.ApplySurface(dialog,settingsFrame,dark,prefs.StartTransparency,prefs.MenuBlur);UpdateDockBackground();}
         dialog.SourceInitialized+=(_,_)=>{lastDark=null;ApplyTheme();};
         themeTimer.Tick+=(_,_)=>{if(lastDark!=Appearance.IsDark(prefs.Theme)||lastHighContrast!=SystemParameters.HighContrast||lastTransparency!=NativeBackdrop.TransparencyAllowed())ApplyTheme();};
         void Toggle(string label,bool value,Action<bool> set){var c=new CheckBox{Content=label,IsChecked=value,Margin=new Thickness(0,6,0,6)};c.Click+=(_,_)=>set(c.IsChecked==true);panel.Children.Add(c);}
@@ -511,6 +577,8 @@ public sealed class DockWindow : Window
         var themes=new ComboBox{ItemsSource=new[]{"System","Light","Dark"},SelectedIndex=prefs.Theme,Margin=new Thickness(0,0,0,16)};
         themes.SelectionChanged+=(_,_)=>{prefs.Theme=themes.SelectedIndex;ApplyTheme();};panel.Children.Add(themes);
         Slider("Icon size (px)",prefs.IconSize,16,64,v=>{prefs.IconSize=Math.Round(v);Refresh(true);});
+        Toggle("macOS-style dock background",prefs.DockBackground,v=>{prefs.DockBackground=v;Refresh(true);Position();});
+        panel.Children.Add(new TextBlock{Text="Uses the menu transparency and blur sliders below.",Opacity=.65,FontSize=12,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,8)});
         Toggle("Reserve space for dock",prefs.ReserveDockSpace,v=>{prefs.ReserveDockSpace=v;Position();});
         Slider("Menu transparency (%)",prefs.StartTransparency*100,0,100,v=>{prefs.StartTransparency=v/100;startMenu?.UpdateAppearance();ApplyTheme();});
         Slider("Menu blur (%)",prefs.MenuBlur/60*100,0,100,v=>{prefs.MenuBlur=v*.6;startMenu?.UpdateAppearance();ApplyTheme();});

@@ -37,9 +37,11 @@ public static class Program
             if(Array.IndexOf(args,"--verify-reservation")>=0)dock.Loaded+=(_,_)=>dock.Dispatcher.BeginInvoke(new Action(async()=>await dock.VerifyReservation()));
             if(Array.IndexOf(args,"--verify-backdrop")>=0)dock.Loaded+=(_,_)=>dock.Dispatcher.BeginInvoke(new Action(async()=>await dock.VerifyBackdropDismissal()));
             if(Array.IndexOf(args,"--settings-preview")>=0){dock.ShowInTaskbar=true;dock.Loaded+=(_,_)=>dock.Dispatcher.BeginInvoke(new Action(dock.Settings));}
+            if(Array.IndexOf(args,"--start-actions-preview")>=0)dock.Loaded+=(_,_)=>dock.Dispatcher.BeginInvoke(new Action(dock.PreviewStartActions));
             if(Array.IndexOf(args,"--verify-start")>=0)dock.Loaded+=(_,_)=>dock.Dispatcher.BeginInvoke(new Action(async()=>await dock.VerifyStart()));
             if(Array.IndexOf(args,"--verify-menu-performance")>=0)dock.Loaded+=(_,_)=>dock.Dispatcher.BeginInvoke(new Action(async()=>await dock.VerifyMenuPerformance()));
             if(Array.IndexOf(args,"--verify-locations")>=0)dock.Loaded+=(_,_)=>dock.Dispatcher.BeginInvoke(new Action(async()=>await dock.VerifyLocations()));
+            if(Array.IndexOf(args,"--verify-dock-glass")>=0)dock.Loaded+=(_,_)=>dock.Dispatcher.BeginInvoke(new Action(async()=>await dock.VerifyDockGlass()));
             app.Run(dock);
         }
     }

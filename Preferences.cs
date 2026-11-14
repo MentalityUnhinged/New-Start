@@ -13,12 +13,15 @@ public sealed class Preferences
     public int Theme { get; set; } // System, Light, Dark
     public double StartTransparency { get; set; } = .8;
     public double MenuBlur { get; set; } = 16;
+    public bool DockBackground {get;set;}=false;
     public bool ShowSystemControls { get; set; } = false;
     public bool ShowTaskView { get; set; } = true;
     public bool ShowDesktop { get; set; } = true;
     public bool ReserveDockSpace { get; set; } = true;
     public bool FollowWindowsTaskbarPins { get; set; } = true;
     public List<string> HiddenTaskbarPins {get;set;}=new();
+    public List<string> HiddenStartPins {get;set;}=new();
+    public List<string> StartPins {get;set;}=new();
     public double Magnification { get; set; } = 1.25;
     public double HoverMilliseconds { get; set; } = 150;
     public bool Hover { get; set; } = true;
@@ -59,7 +62,7 @@ public sealed class Preferences
         if(!Enum.IsDefined(Alignment))Alignment=DockAlignment.Centre;
         StartTransparency=Number(StartTransparency,0,1,.8,2);MenuBlur=Number(MenuBlur,0,60,16,2);
         HoverMilliseconds=Number(HoverMilliseconds,0,1000,150);BounceHeight=Number(BounceHeight,0,30,10);BounceMilliseconds=Number(BounceMilliseconds,100,2000,650);
-        Pins=Paths(Pins);HiddenTaskbarPins=Paths(HiddenTaskbarPins);DockPinOrder=Paths(DockPinOrder);
+        Pins=Paths(Pins);HiddenTaskbarPins=Paths(HiddenTaskbarPins);DockPinOrder=Paths(DockPinOrder);HiddenStartPins=Paths(HiddenStartPins);StartPins=Paths(StartPins);
     }
     public void Save()
     {
