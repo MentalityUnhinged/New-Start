@@ -13,7 +13,7 @@ New Start is an experimental native Windows 11 dock and custom Start menu, built
 - Transparent dock with a white hollow-circle Start button, running indicators and separate pinned/running application sections.
 - Top, left or bottom placement. Bottom centre is the default for a new installation.
 - Left/centre/right alignment on horizontal edges; top/centre/bottom alignment on the left edge.
-- Start opens below a top dock, above a bottom dock, or beside a left dock. Top-centre and bottom-centre Start are centred horizontally on the screen. Other layouts follow the Start button and stay within the work area.
+- Start opens below a top dock, above a bottom dock, or beside a left dock. Top-centre and bottom-centre Start are centred horizontally on the screen; left-centre Start is vertically centred on the dock. Other layouts follow the Start button and stay within the work area.
 - Public Shell AppBar reservation keeps maximised windows clear of the dock, without reserving space for menus.
 - 16–64 px icon sizing, configurable 125% hover magnification and spring launch bounce, respecting reduced-animation preferences.
 - Drag to pin, reorder or remove apps. Imported Windows taskbar pins are read-only and can be hidden locally.

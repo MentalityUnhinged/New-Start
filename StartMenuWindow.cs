@@ -54,7 +54,7 @@ internal sealed class StartMenuWindow : Window
     internal void Reposition()
     {
         var work=SystemParameters.WorkArea;
-        Rect bounds=Owner is DockWindow dock?DockGeometry.MenuBounds(work,dock.StartAnchor,prefs.Edge,prefs.Alignment):new Rect(work.Left+(work.Width-Math.Min(640,work.Width-24))/2,work.Top+12,Math.Min(640,work.Width-24),Math.Min(660,work.Height-24));
+        Rect bounds=Owner is DockWindow dock?DockGeometry.MenuBounds(work,dock.StartAnchor,prefs.Edge,prefs.Alignment,new Rect(dock.Left,dock.Top,dock.ActualWidth,dock.ActualHeight)):new Rect(work.Left+(work.Width-Math.Min(640,work.Width-24))/2,work.Top+12,Math.Min(640,work.Width-24),Math.Min(660,work.Height-24));
         Width=bounds.Width;Height=bounds.Height;Left=bounds.Left;Top=bounds.Top;
     }
     internal void Dismiss()

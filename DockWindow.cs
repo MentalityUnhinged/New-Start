@@ -152,6 +152,7 @@ public sealed class DockWindow : Window
                 bool reserve=edge switch{DockEdge.Top=>area.Top>baseline.Top,DockEdge.Left=>area.Left>baseline.Left,_=>area.Bottom<baseline.Bottom};
                 bool side=edge switch{DockEdge.Top=>menu.Top>=anchor.Bottom,DockEdge.Left=>menu.Left>=anchor.Right,_=>menu.Bottom<=anchor.Top};
                 bool centred=edge==DockEdge.Left||alignment!=DockAlignment.Centre||Math.Abs(menu.Left+menu.Width/2-(SystemParameters.WorkArea.Left+SystemParameters.WorkArea.Width/2))<1;
+                if(edge==DockEdge.Left&&alignment==DockAlignment.Centre)centred=Math.Abs(menu.Top+menu.Height/2-(Top+ActualHeight/2))<1;
                 checks[$"Live{edge}{alignment}"]=reserve&&side&&centred&&SystemParameters.WorkArea.Contains(menu);
                 startMenu.Dismiss();
             }
