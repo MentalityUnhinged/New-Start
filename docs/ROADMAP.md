@@ -20,6 +20,20 @@ Deliver in stages: bar/Start relocation and layout restrictions; clock and Windo
 
 Research references: [Microsoft MenuBar control type](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-supportmenubarcontroltype), [Menu control type](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-supportmenucontroltype), and [notification area APIs](https://learn.microsoft.com/en-us/windows/win32/shell/notification-area). Accessibility menu support and notification-area APIs are separate capabilities; neither alone supplies a full macOS-style global menu or Windows notification-centre replacement.
 
+## Planned: dock and application-bar plugins
+
+An optional extension system will let users add their own dock items, application-bar indicators and menus. This is a future feature, not part of the current beta.
+
+- Support both dock and application-bar placements through one plugin API. Users choose where each plugin appears, its order, and whether it is enabled. A plugin must declare which surfaces it supports; dock-only use must not require enabling the application bar.
+- Initial examples include AI-usage menus showing provider-reported usage, remaining allowance and reset times, plus user-created status indicators, shortcuts and tools. Label unavailable, estimated or stale values clearly; do not imply that every AI provider exposes usage/quota data.
+- Supply a documented SDK, versioned manifest/API and a small working example. Manifests identify the plugin, author, version, compatible API version, supported placements and requested capabilities.
+- Let plugins provide icons, compact status text, menu entries and actions. New Start owns menu rendering so extensions inherit theme, blur, transparency, icon sizing, keyboard access and edge-aware positioning.
+- Provide a Plugins settings page for explicit installation, enable/disable, placement, ordering, configuration and removal. No third-party plugins are enabled or downloaded by default.
+- Design a separate plugin host process with bounded refresh rates, cancellation/timeouts and failure reporting, so a slow or crashed extension cannot freeze the dock or application bar. Process separation is fault isolation, not by itself a security sandbox; assess actual capability enforcement before publishing an SDK.
+- Make requested network, application-data and credential access visible during installation. Keep provider credentials in protected local storage and out of manifests, logs, exports and source control. Do not share account data with plugins automatically.
+
+Deliver in stages: define the extension contract and hosting boundaries; build a local example; add plugin management and both placements; then add an AI-usage example using a supported provider interface. Document compatibility, authoring, packaging and failure behaviour before community distribution. The plugin API must coexist with the application's non-commercial licence; document third-party plugin licensing separately rather than assuming every extension has the same terms.
+
 ## Task model and accessibility
 
 Improve AppUserModelID/hosted-app grouping, keyboard navigation, screen-reader labels, focus handling and cross-app drag acceptance. Add event-driven window updates and dock overflow handling. Measure cold/warm startup separately and profile native blur on multiple GPUs.
@@ -35,4 +49,3 @@ Assess supported alternatives for tray hosting, badges, task progress and previe
 ## Possible future visible replacement
 
 Taskbar suppression remains disabled. A separately validated recovery process, original-state journal, process identity/heartbeat checks and crash/hang/session/Explorer-restart restoration would be required before considering an opt-in visible replacement.
-
