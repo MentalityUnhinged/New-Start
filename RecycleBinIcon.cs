@@ -13,9 +13,18 @@ internal static class RecycleBinIcon
     [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]struct Stock {public uint Size;public IntPtr Icon;public int Index,IconIndex;[MarshalAs(UnmanagedType.ByValTStr,SizeConst=260)]public string Path;}
     [DllImport("shell32.dll",CharSet=CharSet.Unicode)]static extern int SHQueryRecycleBin(string? root,ref Query data);
     [DllImport("shell32.dll",CharSet=CharSet.Unicode)]static extern int SHGetStockIconInfo(uint id,uint flags,ref Stock data);
+    [DllImport("shell32.dll",CharSet=CharSet.Unicode,ExactSpelling=true)]static extern int SHEmptyRecycleBinW(IntPtr owner,string? root,uint flags);
     [DllImport("user32.dll")]static extern bool DestroyIcon(IntPtr icon);
     static DateTime checkedAt;static Task? pending;static bool? full;
     internal static ImageSource? Current {get;private set;}
+    internal static bool? HasItems=>full;
+    internal static int Empty(IntPtr owner)
+    {
+        // Zero flags preserves Windows' confirmation, progress UI and sound.
+        // A null root addresses the current user's Recycle Bins on all drives.
+        try{return SHEmptyRecycleBinW(owner,null,0);}
+        finally{checkedAt=DateTime.MinValue;Refresh();}
+    }
     internal static event Action? Changed;
     internal static void Refresh()
     {

@@ -22,6 +22,7 @@ public sealed class DockWindow : Window
     readonly ContextMenu tray;
     readonly TextBlock clock=new(){Foreground=Brushes.White,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(10)};
     readonly DispatcherTimer timer=new(){Interval=TimeSpan.FromSeconds(1)};
+    readonly DispatcherTimer controlsReleaseTimer=new(DispatcherPriority.Background){Interval=TimeSpan.FromMilliseconds(16)};
     List<Native.TaskWindow> windows=new(); string signature="";
     StartMenuWindow? startMenu;
     DockReservation? reservation;
@@ -32,9 +33,13 @@ public sealed class DockWindow : Window
     readonly List<(string Path,Button Button)> pinButtons=new();
     bool dragging;DateTime suppressClickUntil;
     bool positionQueued;
+    bool emptyingRecycleBin;
     [StructLayout(LayoutKind.Sequential)]struct CursorPoint{public int X,Y;}
     [DllImport("user32.dll")]static extern bool GetCursorPos(out CursorPoint point);
+    [DllImport("user32.dll")]static extern short GetAsyncKeyState(int key);
     DateTime startClosed;
+    Button? controlsButton;
+    bool controlsDismissedByIcon,controlsKeyboardDismiss;
     readonly Image recycleImage=new(){Width=36,Height=36};
     internal async System.Threading.Tasks.Task VerifyReservation()
     {
@@ -105,6 +110,25 @@ public sealed class DockWindow : Window
     {
         dockPins=new DockPins(prefs,()=>TaskbarPins.Current);
         tray=ThemedMenus.Create(prefs);
+        Mouse.AddPreviewMouseDownOutsideCapturedElementHandler(tray,(_,e)=>{
+            if(e.ChangedButton!=MouseButton.Left||controlsButton is not {IsLoaded:true} button)return;
+            if(new Rect(0,0,button.ActualWidth,button.ActualHeight).Contains(e.GetPosition(button)))
+            {
+                tray.IsOpen=false;controlsDismissedByIcon=true;controlsReleaseTimer.Start();e.Handled=true;
+            }
+        });
+        tray.PreviewKeyDown+=(_,e)=>{if(e.Key is Key.Escape or Key.Enter or Key.Space)controlsKeyboardDismiss=true;};
+        tray.Closed+=(_,_)=>{
+            controlsDismissedByIcon=false;
+            if(!controlsKeyboardDismiss&&controlsButton is {IsLoaded:true} button&&GetCursorPos(out var cursor))
+                controlsDismissedByIcon=new Rect(0,0,button.ActualWidth,button.ActualHeight).Contains(button.PointFromScreen(new Point(cursor.X,cursor.Y)));
+            controlsKeyboardDismiss=false;
+            if(controlsDismissedByIcon)controlsReleaseTimer.Start();
+        };
+        // A captured popup can consume MouseUp instead of delivering it to the
+        // dock. Clear the click guard once the physical button has been released.
+        controlsReleaseTimer.Tick+=(_,_)=>{if((GetAsyncKeyState(1)&0x8000)==0){controlsReleaseTimer.Stop();controlsDismissedByIcon=false;}};
+        Closed+=(_,_)=>controlsReleaseTimer.Stop();
         Title="New Start"; WindowStyle=WindowStyle.None; AllowsTransparency=true; Background=Brushes.Transparent;
         ResizeMode=ResizeMode.NoResize; ShowInTaskbar=false; Topmost=true; ShowActivated=false;
         SizeToContent=SizeToContent.Width; Height=90;
@@ -131,7 +155,7 @@ public sealed class DockWindow : Window
         LocationChanged+=(_,_)=>QueuePosition();
         timer.Tick+=(_,_)=>{ Refresh(); Position(); clock.Text=DateTime.Now.ToString(prefs.Edge==DockEdge.Left?"HH\nmm":"t"); _=StartCatalog.Refresh();RecycleBinIcon.Refresh();TaskbarPins.Refresh(); };
         Closed+=(_,_)=>{ timer.Stop(); tray.IsOpen=false; startMenu?.Close();RecycleBinIcon.Changed-=RecycleChanged;reservation?.Dispose(); };
-        PreviewKeyDown+=(_,e)=>{if(e.Key==Key.Escape&&!dragging){tray.IsOpen=false;startMenu?.Dismiss();e.Handled=true;}};
+        PreviewKeyDown+=(_,e)=>{if(e.Key==Key.Escape&&!dragging){controlsKeyboardDismiss=tray.IsOpen;tray.IsOpen=false;controlsDismissedByIcon=false;startMenu?.Dismiss();e.Handled=true;}};
     }
     void RecycleChanged()=>Dispatcher.BeginInvoke(new Action(()=>recycleImage.Source=RecycleBinIcon.Current));
     void QueuePosition()
@@ -329,7 +353,12 @@ public sealed class DockWindow : Window
         }
         Separator("Dock utilities separator");
         var controlsIcon=new System.Windows.Shapes.Path{Data=Geometry.Parse("M 4,8 L 32,8 M 4,18 L 32,18 M 4,28 L 32,28 M 12,4 L 12,12 M 24,14 L 24,22 M 15,24 L 15,32"),Stroke=Brushes.White,StrokeThickness=2,StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round,Width=36,Height=36};
-        if(prefs.ShowSystemControls){var expand=MakeIcon(controlsIcon,"System controls",b=>{BuildTray();tray.Placement=prefs.Edge switch{DockEdge.Top=>PlacementMode.Bottom,DockEdge.Left=>PlacementMode.Right,_=>PlacementMode.Top};tray.PlacementTarget=b;tray.IsOpen=!tray.IsOpen;});row.Children.Add(expand);}
+        if(prefs.ShowSystemControls){var expand=MakeIcon(controlsIcon,"System controls",b=>{
+            if(tray.IsOpen){tray.IsOpen=false;controlsDismissedByIcon=false;return;}
+            // The menu can dismiss on mouse-down before the button receives Click.
+            if(controlsDismissedByIcon){controlsDismissedByIcon=false;return;}
+            BuildTray();tray.Placement=prefs.Edge switch{DockEdge.Top=>PlacementMode.Bottom,DockEdge.Left=>PlacementMode.Right,_=>PlacementMode.Top};tray.PlacementTarget=b;tray.IsOpen=true;
+        });controlsButton=expand;row.Children.Add(expand);}
         if(prefs.Clock==2){clock.MaxWidth=vertical?prefs.IconSize*1.75+12:double.PositiveInfinity;clock.TextWrapping=vertical?TextWrapping.Wrap:TextWrapping.NoWrap;clock.Margin=vertical?new Thickness(2,8,2,8):new Thickness(10);row.Children.Add(clock);}
         if(prefs.ShowDesktop)
         {
@@ -346,7 +375,22 @@ public sealed class DockWindow : Window
         recycleImage.Source=RecycleBinIcon.Current;
         if(recycleImage.Parent is Viewbox oldParent)oldParent.Child=null;
         var recycle=MakeIcon(recycleImage,"Recycle Bin",_=>Launch("shell:RecycleBinFolder"));
-        var recycleMenu=ThemedMenus.Create(prefs);Add(recycleMenu,"Open Recycle Bin",()=>Launch("shell:RecycleBinFolder"));recycle.ContextMenu=recycleMenu;row.Children.Add(recycle);
+        var recycleMenu=ThemedMenus.Create(prefs);Add(recycleMenu,"Open Recycle Bin",()=>Launch("shell:RecycleBinFolder"));
+        var empty=new MenuItem{Header="Empty Recycle Bin",Icon=new TextBlock{Text="\uE74D",FontFamily=new FontFamily("Segoe Fluent Icons"),FontSize=15}};
+        empty.Click+=(_,_)=>EmptyRecycleBin();recycleMenu.Items.Add(empty);
+        recycleMenu.Opened+=(_,_)=>{RecycleBinIcon.Refresh();empty.IsEnabled=!emptyingRecycleBin&&RecycleBinIcon.HasItems!=false;};
+        recycle.ContextMenu=recycleMenu;row.Children.Add(recycle);
+    }
+    void EmptyRecycleBin()
+    {
+        if(emptyingRecycleBin)return;emptyingRecycleBin=true;
+        try
+        {
+            int result=RecycleBinIcon.Empty(new System.Windows.Interop.WindowInteropHelper(this).Handle);
+            if(result<0&&result!=unchecked((int)0x800704C7)&&result!=unchecked((int)0x80004004))
+                MessageBox.Show(this,Marshal.GetExceptionForHR(result)?.Message??"Windows could not empty the Recycle Bin.","New Start");
+        }
+        finally{emptyingRecycleBin=false;}
     }
     void MovePin(string path,int delta){dockPins.Move(path,delta);Save();Refresh(true);}
     void AttachPinDrag(Button button,string path,bool pinned)
@@ -414,8 +458,6 @@ public sealed class DockWindow : Window
     void BuildTray()
     {
         tray.Items.Clear();
-        tray.Items.Add(new MenuItem{Header="System controls",IsEnabled=false,FontWeight=FontWeights.SemiBold,Opacity=1,Icon=new Border{Width=16,Height=16}});
-        tray.Items.Add(new Separator());
         foreach(var entry in new[]{("Sound","ms-settings:sound","\uE767"),("Network","ms-settings:network-status","\uE701"),("Bluetooth","ms-settings:bluetooth","\uE702"),("Windows taskbar","ms-settings:taskbar","\uE713")})
         {
             var item=new MenuItem{Header=entry.Item1,Icon=new TextBlock{Text=entry.Item3,FontFamily=new FontFamily("Segoe Fluent Icons"),FontSize=15,VerticalAlignment=VerticalAlignment.Center}};
