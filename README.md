@@ -19,7 +19,7 @@ New Start is an experimental native Windows 11 dock and custom Start menu, built
 - Drag to pin, reorder or remove apps. Imported Windows taskbar pins are read-only and can be hidden locally.
 - Application menus with launch, pin/unpin, close and supported automatic Recent destinations.
 - Custom Start with Windows-synchronised pins, 6 × 6 sections, whole-page scrolling and conditional page pips; alphabetical All Apps and app search. No recent apps/files section in Start.
-- Light/Dark/System appearance, adjustable menu transparency and blur, optional clock, system controls, Task View and Show Desktop, plus the Windows Recycle Bin with an Empty action using Windows confirmation.
+- Light/Dark/System appearance, adjustable menu transparency and blur, optional clock, system controls, Task View and Show Desktop, plus the Windows Recycle Bin with live empty/full icons and an Empty action using Windows confirmation.
 - Account display name/avatar and standard folder/settings shortcuts, resolved locally at runtime.
 
 ## Screenshots

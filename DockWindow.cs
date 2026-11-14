@@ -26,6 +26,8 @@ public sealed class DockWindow : Window
     List<Native.TaskWindow> windows=new(); string signature="";
     StartMenuWindow? startMenu;
     DockReservation? reservation;
+    RecycleBinWatcher? recycleWatcher;
+    MenuItem? emptyRecycleItem;
     readonly DockPins dockPins;
     readonly Grid dockSurface=new();
     readonly Border blankSurface=new(){Background=new SolidColorBrush(Color.FromArgb(1,0,0,0)),VerticalAlignment=VerticalAlignment.Bottom};
@@ -141,7 +143,7 @@ public sealed class DockWindow : Window
         AllowDrop=true;DragOver+=DockDragOver;Drop+=DockDrop;
         Loaded+=(_,_)=>{
             TaskbarPins.Refresh();
-            RecycleBinIcon.Changed+=RecycleChanged;RecycleBinIcon.Refresh();
+            RecycleBinIcon.Changed+=RecycleChanged;recycleWatcher=new RecycleBinWatcher(this);RecycleBinIcon.Refresh();
             Refresh(); Position();
             reservation=new DockReservation(this);reservation.Changed+=Position;
             Position();timer.Start();
@@ -154,10 +156,17 @@ public sealed class DockWindow : Window
         // the edge-relative position after that notification has settled.
         LocationChanged+=(_,_)=>QueuePosition();
         timer.Tick+=(_,_)=>{ Refresh(); Position(); clock.Text=DateTime.Now.ToString(prefs.Edge==DockEdge.Left?"HH\nmm":"t"); _=StartCatalog.Refresh();RecycleBinIcon.Refresh();TaskbarPins.Refresh(); };
-        Closed+=(_,_)=>{ timer.Stop(); tray.IsOpen=false; startMenu?.Close();RecycleBinIcon.Changed-=RecycleChanged;reservation?.Dispose(); };
+        Closed+=(_,_)=>{ timer.Stop(); tray.IsOpen=false; startMenu?.Close();recycleWatcher?.Dispose();RecycleBinIcon.Changed-=RecycleChanged;reservation?.Dispose(); };
         PreviewKeyDown+=(_,e)=>{if(e.Key==Key.Escape&&!dragging){controlsKeyboardDismiss=tray.IsOpen;tray.IsOpen=false;controlsDismissedByIcon=false;startMenu?.Dismiss();e.Handled=true;}};
     }
-    void RecycleChanged()=>Dispatcher.BeginInvoke(new Action(()=>recycleImage.Source=RecycleBinIcon.Current));
+    void RecycleChanged()
+    {
+        if(Dispatcher.HasShutdownStarted)return;
+        Dispatcher.BeginInvoke(new Action(()=>{
+            recycleImage.Source=RecycleBinIcon.Current;
+            if(emptyRecycleItem!=null)emptyRecycleItem.IsEnabled=!emptyingRecycleBin&&RecycleBinIcon.HasItems!=false;
+        }));
+    }
     void QueuePosition()
     {
         if(positionQueued||!IsLoaded||Dispatcher.HasShutdownStarted)return;positionQueued=true;
@@ -377,8 +386,9 @@ public sealed class DockWindow : Window
         var recycle=MakeIcon(recycleImage,"Recycle Bin",_=>Launch("shell:RecycleBinFolder"));
         var recycleMenu=ThemedMenus.Create(prefs);Add(recycleMenu,"Open Recycle Bin",()=>Launch("shell:RecycleBinFolder"));
         var empty=new MenuItem{Header="Empty Recycle Bin",Icon=new TextBlock{Text="\uE74D",FontFamily=new FontFamily("Segoe Fluent Icons"),FontSize=15}};
+        emptyRecycleItem=empty;
         empty.Click+=(_,_)=>EmptyRecycleBin();recycleMenu.Items.Add(empty);
-        recycleMenu.Opened+=(_,_)=>{RecycleBinIcon.Refresh();empty.IsEnabled=!emptyingRecycleBin&&RecycleBinIcon.HasItems!=false;};
+        recycleMenu.Opened+=(_,_)=>{RecycleBinIcon.Refresh(true);empty.IsEnabled=!emptyingRecycleBin&&RecycleBinIcon.HasItems!=false;};
         recycle.ContextMenu=recycleMenu;row.Children.Add(recycle);
     }
     void EmptyRecycleBin()
