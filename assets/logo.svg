@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">New Start</title><desc id="desc">An open white circle with a pale blue spark, on a charcoal tile.</desc>
+  <defs><linearGradient id="tile" x2="0" y2="1"><stop stop-color="#30343c"/><stop offset="1" stop-color="#15181f"/></linearGradient></defs>
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#tile)" stroke="#59616d" stroke-width="1.5"/>
+  <path d="M 177 77 A 74 74 0 1 0 202 132" fill="none" stroke="#fafcff" stroke-width="12" stroke-linecap="round"/>
+  <path d="M 204 37 L 210 54 L 227 60 L 210 66 L 204 83 L 198 66 L 181 60 L 198 54 Z" fill="#bdefff"/>
+</svg>

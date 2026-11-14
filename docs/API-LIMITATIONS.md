@@ -1,0 +1,12 @@
+# Windows API boundaries
+
+- **Reservation:** public [Shell AppBar APIs](https://learn.microsoft.com/en-us/windows/win32/shell/application-desktop-toolbars) reserve a strip on the selected edge. The current implementation targets the primary display. Existing Explorer reservation is respected.
+- **Windows taskbar pins:** Windows has no public general-purpose pin enumeration contract. New Start reads the current user's TaskBar shortcuts and matches known identities against Taskband data without writing it. This compatibility adapter may require updates on new Windows builds.
+- **Start pins:** Windows PowerShell `Export-StartLayout` supplies a read-only snapshot where supported. The last synced list is retained locally if export fails. Windows Start folders and some newer pin formats may be unsupported.
+- **All Apps:** `shell:AppsFolder` lists shell-registered desktop and packaged apps; unregistered executables are not automatically discoverable. Explicit local pins can still launch them.
+- **Jump Lists:** [IApplicationDocumentLists](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-iapplicationdocumentlists) exposes only automatic Recent/Frequent categories. User-pinned documents, custom categories and app-defined tasks are not exposed. Apps without resolvable explicit identity show standard commands only.
+- **Close:** [WM_SYSCOMMAND / SC_CLOSE](https://learn.microsoft.com/en-us/windows/win32/menurc/wm-syscommand) requests a normal close, allowing the app's own save prompts. It does not force-terminate applications.
+- **Backdrop:** custom Windows Composition blur supports a variable radius; at zero the native companion is hidden entirely. Windows transparency/high-contrast preferences take precedence. Native graphics cost varies by driver/session; no universal performance claim is made.
+- **Tray/account/system integration:** app tray hosting is not implemented. Account display name/avatar and Known Folders are looked up locally, with generic fallbacks. The physical Windows key remains under Windows control.
+
+No administrator access, Explorer injection, private shell writes, taskbar hiding, or complete shell-parity claim is part of this preview.
