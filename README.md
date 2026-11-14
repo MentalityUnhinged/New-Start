@@ -38,6 +38,8 @@ Examples from the beta; installed applications and desktop appearance vary by us
 
 ![Themed System Controls menu with sound, network, Bluetooth and clock](assets/screenshots/system-controls.png)
 
+![Additional view of System Controls with the transparent dock](assets/screenshots/system-controls-alternate.png)
+
 ### Application context menu
 
 ![Application menu with launch, unpin and reorder actions](assets/screenshots/app-context-menu.png)
