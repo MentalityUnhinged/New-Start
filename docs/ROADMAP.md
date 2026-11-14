@@ -34,6 +34,17 @@ An optional extension system will let users add their own dock items, applicatio
 
 Deliver in stages: define the extension contract and hosting boundaries; build a local example; add plugin management and both placements; then add an AI-usage example using a supported provider interface. Document compatibility, authoring, packaging and failure behaviour before community distribution. The plugin API must coexist with the application's non-commercial licence; document third-party plugin licensing separately rather than assuming every extension has the same terms.
 
+## Planned: HoverOver window previews
+
+Add an optional window-preview pop-out when the pointer rests over a running application's dock icon. This is a future feature, not included in the current beta.
+
+- Show a window thumbnail and title for a single window, or a group of previews when an app has multiple windows. Pinned apps with no running windows keep their normal hover behaviour without an empty preview.
+- Clicking a preview activates/restores that specific window. Provide an accessible close action that requests a normal window close and respects the application's save prompts.
+- Position the pop-out above a bottom dock, below a top dock or to the right of a left dock, clamped to the available display area. Match New Start's theme, blur, transparency and rounded menu styling.
+- Include an enable/disable setting and adjustable hover delay. Keep the preview open while moving from the icon into the pop-out, dismiss it after leaving or pressing Escape, and avoid stealing focus merely on hover. Coordinate with magnification, dragging and context menus.
+- Research native live-thumbnail support and its hosting requirements before selecting an implementation. Handle minimised, closed, protected and otherwise unavailable windows with an icon/title fallback; do not promise a live image in every case or persist window captures.
+- Validate window grouping, rapid window changes, activation, close/save prompts, keyboard access, all dock edges, display scaling and graphics/session performance. Only update previews while needed.
+
 ## Task model and accessibility
 
 Improve AppUserModelID/hosted-app grouping, keyboard navigation, screen-reader labels, focus handling and cross-app drag acceptance. Add event-driven window updates and dock overflow handling. Measure cold/warm startup separately and profile native blur on multiple GPUs.
