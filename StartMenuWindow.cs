@@ -65,7 +65,7 @@ internal sealed class StartMenuWindow : Window
     }
     internal StartMenuWindow(Preferences preferences,bool sectionPreview=false)
     {
-        prefs=preferences;Title="New Start";Width=640;Height=Math.Min(660,SystemParameters.WorkArea.Height-30);
+        prefs=preferences;Title="New Start (Beta)";Width=640;Height=Math.Min(660,SystemParameters.WorkArea.Height-30);
         WindowStyle=WindowStyle.None;AllowsTransparency=true;ResizeMode=ResizeMode.NoResize;ShowInTaskbar=false;Topmost=true;Background=Brushes.Transparent;
         NativeBackdrop.Configure(this);
         frame=new Border{CornerRadius=new CornerRadius(8),BorderThickness=new Thickness(1),BorderBrush=new SolidColorBrush(Color.FromArgb(50,128,128,128)),Child=layout};

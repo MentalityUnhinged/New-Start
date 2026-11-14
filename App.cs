@@ -32,7 +32,7 @@ public static class Program
         }
         else
         {
-            var dock=new DockWindow();
+            var dock=new DockWindow{Title="New Start (Beta)"};
             if(Array.IndexOf(args,"--dock-preview")>=0)dock.ShowInTaskbar=true;
             if(Array.IndexOf(args,"--verify-reservation")>=0)dock.Loaded+=(_,_)=>dock.Dispatcher.BeginInvoke(new Action(async()=>await dock.VerifyReservation()));
             if(Array.IndexOf(args,"--verify-backdrop")>=0)dock.Loaded+=(_,_)=>dock.Dispatcher.BeginInvoke(new Action(async()=>await dock.VerifyBackdropDismissal()));

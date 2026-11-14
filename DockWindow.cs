@@ -402,10 +402,11 @@ public sealed class DockWindow : Window
         var panel=new StackPanel{Margin=new Thickness(32,8,32,28)};
         var contents=new DockPanel();
         var settingsFrame=new Border{CornerRadius=new CornerRadius(8),BorderThickness=new Thickness(1),BorderBrush=new SolidColorBrush(Color.FromArgb(50,128,128,128)),Child=contents};
-        var dialog=new Window{Title="New Start settings",WindowStyle=WindowStyle.None,AllowsTransparency=true,Width=500,Height=Math.Min(740,SystemParameters.WorkArea.Height-32),MinWidth=420,MinHeight=400,Content=settingsFrame,Owner=this,WindowStartupLocation=WindowStartupLocation.CenterScreen,ResizeMode=ResizeMode.NoResize};
+        var dialog=new Window{Title="New Start settings (Beta)",WindowStyle=WindowStyle.None,AllowsTransparency=true,Width=500,Height=Math.Min(740,SystemParameters.WorkArea.Height-32),MinWidth=420,MinHeight=400,Content=settingsFrame,Owner=this,WindowStartupLocation=WindowStartupLocation.CenterScreen,ResizeMode=ResizeMode.NoResize};
         NativeBackdrop.Configure(dialog);
         var header=new Grid{Margin=new Thickness(32,20,20,12)};
-        var title=new TextBlock{Text="Settings",FontSize=22,FontWeight=FontWeights.SemiBold,VerticalAlignment=VerticalAlignment.Center};title.MouseLeftButtonDown+=(_,_)=>dialog.DragMove();header.Children.Add(title);
+        var title=new TextBlock{Text="Settings · Beta",FontSize=22,FontWeight=FontWeights.SemiBold,VerticalAlignment=VerticalAlignment.Center};title.MouseLeftButtonDown+=(_,_)=>dialog.DragMove();header.Children.Add(title);
+        panel.Children.Add(new TextBlock{Text="New Start · 0.1.0-beta.1",Opacity=.65,Margin=new Thickness(0,0,0,8)});
         var close=new Button{Content=new TextBlock{Text="\uE8BB",FontFamily=new FontFamily("Segoe Fluent Icons"),FontSize=14},Width=36,Height=36,Padding=new Thickness(0),HorizontalAlignment=HorizontalAlignment.Right,ToolTip="Close settings"};StartMenuWindow.Borderless(close);close.Click+=(_,_)=>dialog.Close();System.Windows.Automation.AutomationProperties.SetName(close,"Close settings");header.Children.Add(close);
         DockPanel.SetDock(header,Dock.Top);contents.Children.Add(header);contents.Children.Add(new ScrollViewer{Content=panel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled});
         var themeTimer=new DispatcherTimer{Interval=TimeSpan.FromSeconds(1)};

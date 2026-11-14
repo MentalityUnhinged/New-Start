@@ -2,6 +2,8 @@
 <h1 align="center">New Start</h1>
 <p align="center">A fresh start for the Windows desktop.</p>
 
+**Beta build: 0.1.0-beta.1.** This is pre-release software under active development, with known limitations. It is not a stable or production-ready release.
+
 New Start is an experimental native Windows 11 dock and custom Start menu, built with C#/.NET 8 WPF and a small Windows Composition helper. It keeps Explorer available as a fallback. There is no browser shell, administrator requirement, injection, or modification of Windows taskbar pin storage.
 
 **Source-available for non-commercial use, modification and sharing under [PolyForm Noncommercial 1.0.0](LICENSE).** Commercial use is not granted. A commercial restriction means this is not OSI-approved open-source software.
