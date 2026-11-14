@@ -1,6 +1,6 @@
 <p align="center"><img src="assets/logo.svg" width="112" alt="New Start logo"></p>
 <h1 align="center">New Start</h1>
-<p align="center">A fresh start for the Windows desktop.</p>
+<p align="center">Building the Taskbar Everybody Wants — But Microsoft</p>
 
 **Beta build: 0.1.0-beta.1.** This is pre-release software under active development, with known limitations. It is not a stable or production-ready release.
 
