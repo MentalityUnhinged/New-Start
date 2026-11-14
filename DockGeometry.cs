@@ -24,7 +24,7 @@ internal static class DockGeometry
         if(edge==DockEdge.Left)width=Math.Min(width,Math.Max(1,work.Right-anchor.Right-gap-margin));
         else height=Math.Min(height,Math.Max(1,edge==DockEdge.Top?work.Bottom-anchor.Bottom-gap-margin:anchor.Top-work.Top-gap-margin));
         double x=edge==DockEdge.Left?anchor.Right+gap:anchor.Left+anchor.Width/2-width/2;
-        if(edge==DockEdge.Top&&alignment==DockAlignment.Centre)x=work.Left+(work.Width-width)/2;
+        if(edge!=DockEdge.Left&&alignment==DockAlignment.Centre)x=work.Left+(work.Width-width)/2;
         double y=edge switch{DockEdge.Top=>anchor.Bottom+gap,DockEdge.Left=>anchor.Top+anchor.Height/2-height/2,_=>anchor.Top-gap-height};
         x=Math.Clamp(x,work.Left+margin,Math.Max(work.Left+margin,work.Right-width-margin));
         y=Math.Clamp(y,work.Top+margin,Math.Max(work.Top+margin,work.Bottom-height-margin));

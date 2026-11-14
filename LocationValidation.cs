@@ -16,7 +16,7 @@ internal static class LocationValidation
             var anchor=new Rect(origin.X+12,origin.Y+(edge==DockEdge.Bottom?72:12),16,16);
             var menu=DockGeometry.MenuBounds(work,anchor,edge,alignment);
             bool side=edge switch{DockEdge.Top=>menu.Top>=anchor.Bottom,DockEdge.Left=>menu.Left>=anchor.Right,_=>menu.Bottom<=anchor.Top};
-            bool centred=edge!=DockEdge.Top||alignment!=DockAlignment.Centre||Math.Abs(menu.Left+menu.Width/2-960)<1;
+            bool centred=edge==DockEdge.Left||alignment!=DockAlignment.Centre||Math.Abs(menu.Left+menu.Width/2-960)<1;
             checks[$"{edge}{alignment}MenuFits"]=work.Contains(menu)&&side&&centred;
         }
         prefs.Edge=(DockEdge)99;prefs.Alignment=(DockAlignment)99;prefs.Normalize();
