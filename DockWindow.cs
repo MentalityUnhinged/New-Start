@@ -174,7 +174,8 @@ public sealed class DockWindow : Window
         double iconButtonHeight=prefs.IconSize*1.75+12;
         double visibleDockHeight=4+iconButtonHeight/2+prefs.IconSize/2+2;
         bool vertical=prefs.Edge==DockEdge.Left;
-        blankSurface.Height=vertical?double.NaN:visibleDockHeight;blankSurface.Width=vertical?visibleDockHeight:double.NaN;
+        double hitThickness=visibleDockHeight-4;
+        blankSurface.Height=vertical?double.NaN:hitThickness;blankSurface.Width=vertical?hitThickness:double.NaN;
         blankSurface.VerticalAlignment=prefs.Edge==DockEdge.Top?VerticalAlignment.Top:vertical?VerticalAlignment.Stretch:VerticalAlignment.Bottom;
         blankSurface.HorizontalAlignment=vertical?HorizontalAlignment.Left:HorizontalAlignment.Stretch;
         reservation?.Update(prefs.ReserveDockSpace,visibleDockHeight,prefs.Edge);
