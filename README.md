@@ -22,6 +22,30 @@ New Start is an experimental native Windows 11 dock and custom Start menu, built
 - Light/Dark/System appearance, adjustable menu transparency and blur, optional clock, system controls, Task View and Show Desktop, plus the Windows Recycle Bin with an Empty action using Windows confirmation.
 - Account display name/avatar and standard folder/settings shortcuts, resolved locally at runtime.
 
+## Screenshots
+
+Examples from the beta; installed applications and desktop appearance vary by user.
+
+### Dock
+
+![Transparent New Start dock with centred app icons](assets/screenshots/dock.png)
+
+### Start menu
+
+![New Start pinned applications, app search and folder shortcuts](assets/screenshots/start-menu.png)
+
+### System Controls
+
+![Themed System Controls menu with sound, network, Bluetooth and clock](assets/screenshots/system-controls.png)
+
+### Application context menu
+
+![Application menu with launch, unpin and reorder actions](assets/screenshots/app-context-menu.png)
+
+### File Explorer Jump List
+
+![File Explorer menu with recent destinations and dock actions](assets/screenshots/explorer-jump-list.png)
+
 ## Build and run
 
 Requirements: Windows 11 x64, .NET 8 SDK, Visual Studio 2022 or newer Build Tools with **Desktop development with C++**, and a Windows 11 SDK. Running the framework-dependent build requires the .NET 8 Windows Desktop Runtime and Microsoft Visual C++ x64 runtime.
