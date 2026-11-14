@@ -45,6 +45,17 @@ Add an optional window-preview pop-out when the pointer rests over a running app
 - Research native live-thumbnail support and its hosting requirements before selecting an implementation. Handle minimised, closed, protected and otherwise unavailable windows with an icon/title fallback; do not promise a live image in every case or persist window captures.
 - Validate window grouping, rapid window changes, activation, close/save prompts, keyboard access, all dock edges, display scaling and graphics/session performance. Only update previews while needed.
 
+## Planned: custom icons, including Start
+
+Allow users to replace icons in New Start, including the Start circle. This is a future feature, not included in the current beta.
+
+- Provide icon overrides for individual pinned applications and built-in dock/application-bar controls, including Start. Overrides change New Start's presentation only, not Windows shortcuts or the application's own files.
+- Use the same custom Start icon wherever Start is currently placed: the dock or the optional application bar. Keep its full click target, accessible name, sizing and hover behaviour independent of transparent pixels in the image.
+- Add an icon picker with preview, per-item reset and restore-all-defaults actions. Keep the hollow circle and current system/application icons as defaults.
+- Research supported image formats, including Windows ICO, transparent PNG and vector SVG, with consistent scaling and aspect-ratio handling. Validate imported files, limit dimensions/file size and handle missing or invalid assets gracefully; no format is promised until its loading path is implemented and tested.
+- Copy chosen assets into New Start's local customization storage so moving the source file does not break an override. Associate application overrides with stable identities so reordering or moving the dock does not lose them.
+- Keep personal icon choices/assets out of source control. Any future theme/icon-pack import or export should be explicit, portable and documented, with licensing/attribution retained where required.
+
 ## Task model and accessibility
 
 Improve AppUserModelID/hosted-app grouping, keyboard navigation, screen-reader labels, focus handling and cross-app drag acceptance. Add event-driven window updates and dock overflow handling. Measure cold/warm startup separately and profile native blur on multiple GPUs.
