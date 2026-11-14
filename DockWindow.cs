@@ -19,7 +19,7 @@ public sealed class DockWindow : Window
 {
     readonly Preferences prefs=Preferences.Load();
     readonly StackPanel row=new(){Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Bottom};
-    readonly Popup tray=new(){AllowsTransparency=true,StaysOpen=false,Placement=PlacementMode.Top};
+    readonly ContextMenu tray;
     readonly TextBlock clock=new(){Foreground=Brushes.White,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(10)};
     readonly DispatcherTimer timer=new(){Interval=TimeSpan.FromSeconds(1)};
     List<Native.TaskWindow> windows=new(); string signature="";
@@ -104,6 +104,7 @@ public sealed class DockWindow : Window
     public DockWindow()
     {
         dockPins=new DockPins(prefs,()=>TaskbarPins.Current);
+        tray=ThemedMenus.Create(prefs);
         Title="New Start"; WindowStyle=WindowStyle.None; AllowsTransparency=true; Background=Brushes.Transparent;
         ResizeMode=ResizeMode.NoResize; ShowInTaskbar=false; Topmost=true; ShowActivated=false;
         SizeToContent=SizeToContent.Width; Height=90;
@@ -263,7 +264,7 @@ public sealed class DockWindow : Window
     }
     void Refresh(bool force=false)
     {
-        if(dragging||(!force&&row.Children.OfType<Button>().Any(b=>b.ContextMenu?.IsOpen==true)))return;
+        if(dragging||(!force&&(tray.IsOpen||row.Children.OfType<Button>().Any(b=>b.ContextMenu?.IsOpen==true))))return;
         windows=Native.Windows();
         var effectivePins=dockPins.All();
         string next=string.Join("|",windows.Select(w=>$"{w.Handle}:{w.Path}:{w.Title}"))+string.Join("|",effectivePins);
@@ -412,12 +413,19 @@ public sealed class DockWindow : Window
     static void Activate(Native.TaskWindow w){if(Native.GetForegroundWindow()==w.Handle){Native.ShowWindowAsync(w.Handle,6);return;}if(Native.IsIconic(w.Handle))Native.ShowWindowAsync(w.Handle,9);if(!Native.SetForegroundWindow(w.Handle))MessageBox.Show("Windows declined window activation. Use Alt+Tab to switch to this window.");}
     void BuildTray()
     {
-        var panel=new StackPanel{Margin=new Thickness(14)};
-        panel.Children.Add(new TextBlock{Text="System controls",FontSize=16,Foreground=Brushes.White});
-        panel.Children.Add(new TextBlock{Text="App tray icons remain in Windows Explorer.",Foreground=Brushes.White,Margin=new Thickness(0,8,0,8)});
-        foreach(var pair in new[]{("Sound","ms-settings:sound"),("Network","ms-settings:network-status"),("Bluetooth","ms-settings:bluetooth"),("Windows taskbar","ms-settings:taskbar")}) {var b=new Button{Content=pair.Item1,Margin=new Thickness(0,3,0,3)};b.Click+=(_,_)=>Launch(pair.Item2);panel.Children.Add(b);}
-        if(prefs.Clock==1)panel.Children.Add(new TextBlock{Text=DateTime.Now.ToString("f"),Foreground=Brushes.White,Margin=new Thickness(0,10,0,0)});
-        tray.Child=new Border{Background=new SolidColorBrush(Color.FromArgb(235,25,25,25)),CornerRadius=new CornerRadius(8),Child=panel};
+        tray.Items.Clear();
+        tray.Items.Add(new MenuItem{Header="System controls",IsEnabled=false,FontWeight=FontWeights.SemiBold,Opacity=1,Icon=new Border{Width=16,Height=16}});
+        tray.Items.Add(new Separator());
+        foreach(var entry in new[]{("Sound","ms-settings:sound","\uE767"),("Network","ms-settings:network-status","\uE701"),("Bluetooth","ms-settings:bluetooth","\uE702"),("Windows taskbar","ms-settings:taskbar","\uE713")})
+        {
+            var item=new MenuItem{Header=entry.Item1,Icon=new TextBlock{Text=entry.Item3,FontFamily=new FontFamily("Segoe Fluent Icons"),FontSize=15,VerticalAlignment=VerticalAlignment.Center}};
+            item.Click+=(_,_)=>Launch(entry.Item2);tray.Items.Add(item);
+        }
+        if(prefs.Clock==1)
+        {
+            tray.Items.Add(new Separator());
+            tray.Items.Add(new MenuItem{Header=DateTime.Now.ToString("f"),IsEnabled=false,Opacity=1,Icon=new TextBlock{Text="\uE787",FontFamily=new FontFamily("Segoe Fluent Icons"),FontSize=15}});
+        }
     }
     internal void Settings()
     {
