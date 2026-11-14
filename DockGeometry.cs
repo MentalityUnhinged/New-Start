@@ -7,17 +7,23 @@ public enum DockAlignment { Start, Centre, End }
 internal static class DockGeometry
 {
     internal const double WindowClearance=8;
+    internal const double ScreenClearance=8;
     internal static double Aligned(double origin,double length,double size,DockAlignment alignment)
     {
         double offset=alignment switch{DockAlignment.Start=>8,DockAlignment.End=>length-size-8,_=>(length-size)/2};
         return origin+Math.Clamp(offset,0,Math.Max(0,length-size));
     }
-    internal static Point DockOrigin(Rect area,Size size,DockEdge edge,DockAlignment alignment)=>edge switch
+    internal static Point DockOrigin(Rect area,Size size,DockEdge edge,DockAlignment alignment,double iconSize=36)
     {
-        DockEdge.Top=>new(Aligned(area.Left,area.Width,size.Width,alignment),area.Top+4),
-        DockEdge.Left=>new(area.Left+4,Aligned(area.Top,area.Height,size.Height,alignment)),
-        _=>new(Aligned(area.Left,area.Width,size.Width,alignment),area.Bottom-size.Height-4)
-    };
+        // Align the visible icon, excluding transparent button/animation padding.
+        double inset=ScreenClearance-(iconSize*1.75+12-iconSize)/2;
+        return edge switch
+        {
+            DockEdge.Top=>new(Aligned(area.Left,area.Width,size.Width,alignment),area.Top+inset),
+            DockEdge.Left=>new(area.Left+inset,Aligned(area.Top,area.Height,size.Height,alignment)),
+            _=>new(Aligned(area.Left,area.Width,size.Width,alignment),area.Bottom-size.Height-inset)
+        };
+    }
     internal static Rect MenuBounds(Rect work,Rect anchor,DockEdge edge,DockAlignment alignment=DockAlignment.Centre,Rect? dockBounds=null)
     {
         const double margin=8,gap=10;

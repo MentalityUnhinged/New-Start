@@ -128,7 +128,7 @@ public sealed class DockWindow : Window
         // Windows can move a window after an AppBar work-area change. Restore
         // the edge-relative position after that notification has settled.
         LocationChanged+=(_,_)=>QueuePosition();
-        timer.Tick+=(_,_)=>{ Refresh(); Position(); clock.Text=DateTime.Now.ToString("t"); _=StartCatalog.Refresh();RecycleBinIcon.Refresh();TaskbarPins.Refresh(); };
+        timer.Tick+=(_,_)=>{ Refresh(); Position(); clock.Text=DateTime.Now.ToString(prefs.Edge==DockEdge.Left?"HH\nmm":"t"); _=StartCatalog.Refresh();RecycleBinIcon.Refresh();TaskbarPins.Refresh(); };
         Closed+=(_,_)=>{ timer.Stop(); tray.IsOpen=false; startMenu?.Close();RecycleBinIcon.Changed-=RecycleChanged;reservation?.Dispose(); };
         PreviewKeyDown+=(_,e)=>{if(e.Key==Key.Escape&&!dragging){tray.IsOpen=false;startMenu?.Dismiss();e.Handled=true;}};
     }
@@ -168,6 +168,10 @@ public sealed class DockWindow : Window
                 double pixel=1/(edge==DockEdge.Left?dpi.DpiScaleX:dpi.DpiScaleY);
                 clearances[$"{edge}{alignment}"]=clearance;
                 checks[$"Clearance{edge}{alignment}"]=clearance>=DockGeometry.WindowClearance-.01&&clearance<=DockGeometry.WindowClearance+pixel;
+                var outer=reservation!.Bounds;
+                double outside=edge switch{DockEdge.Top=>anchor.Top-outer.Top/dpi.DpiScaleY,DockEdge.Left=>anchor.Left-outer.Left/dpi.DpiScaleX,_=>outer.Bottom/dpi.DpiScaleY-anchor.Bottom};
+                clearances[$"Screen{edge}{alignment}"]=outside;
+                checks[$"ScreenClearance{edge}{alignment}"]=Math.Abs(outside-DockGeometry.ScreenClearance)<=pixel;
                 startMenu.Dismiss();
             }
         }
@@ -188,13 +192,14 @@ public sealed class DockWindow : Window
         // The icon is centred inside its hit target. Reserve to its normal visible top,
         // not the larger transparent window used for hover/bounce animation.
         double iconButtonHeight=prefs.IconSize*1.75+12;
-        double dockThickness=4+iconButtonHeight/2+prefs.IconSize/2;
-        double reservedThickness=dockThickness+DockGeometry.WindowClearance;
+        double reservedThickness=DockGeometry.ScreenClearance+prefs.IconSize+DockGeometry.WindowClearance;
         bool vertical=prefs.Edge==DockEdge.Left;
-        double hitThickness=dockThickness-4+2;
+        double hitThickness=prefs.IconSize+4;
         blankSurface.Height=vertical?double.NaN:hitThickness;blankSurface.Width=vertical?hitThickness:double.NaN;
         blankSurface.VerticalAlignment=prefs.Edge==DockEdge.Top?VerticalAlignment.Top:vertical?VerticalAlignment.Stretch:VerticalAlignment.Bottom;
         blankSurface.HorizontalAlignment=vertical?HorizontalAlignment.Left:HorizontalAlignment.Stretch;
+        double hitInset=(iconButtonHeight-prefs.IconSize)/2-2;
+        blankSurface.Margin=prefs.Edge switch{DockEdge.Top=>new Thickness(0,hitInset,0,0),DockEdge.Left=>new Thickness(hitInset,0,0,0),_=>new Thickness(0,0,0,hitInset)};
         reservation?.Update(prefs.ReserveDockSpace,reservedThickness,prefs.Edge);
         Rect area;
         if(reservation is {Enabled:true} bar&&bar.Bounds.Bottom>bar.Bounds.Top)
@@ -203,7 +208,7 @@ public sealed class DockWindow : Window
             area=new Rect(bounds.Left/dpi.DpiScaleX,bounds.Top/dpi.DpiScaleY,(bounds.Right-bounds.Left)/dpi.DpiScaleX,(bounds.Bottom-bounds.Top)/dpi.DpiScaleY);
         }
         else area=SystemParameters.WorkArea;
-        var origin=DockGeometry.DockOrigin(area,new Size(ActualWidth,ActualHeight),prefs.Edge,prefs.Alignment);
+        var origin=DockGeometry.DockOrigin(area,new Size(ActualWidth,ActualHeight),prefs.Edge,prefs.Alignment,prefs.IconSize);
         Left=origin.X;Top=origin.Y;
         if(startMenu?.IsVisible==true)startMenu.Reposition();
     }
