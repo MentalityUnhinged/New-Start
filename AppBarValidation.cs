@@ -33,6 +33,7 @@ public sealed partial class DockWindow
                     bar.Expand(section);await Task.Delay(350);
                     var expanded=DesktopDisplays.Work(bar.Display.Handle);
                     checks[key+section+"OverlayOnly"]=Same(resting,expanded)&&bar.ActualHeight>AdaptiveAppBarWindow.RestHeight;
+                    checks[key+section+"ContinuousMaterial"]=bar.HasContinuousMaterial;
                     bar.Collapse();await Task.Delay(300);
                     checks[key+section+"Collapses"]=bar.Section==AppBarSection.None&&Math.Abs(bar.ActualHeight-AdaptiveAppBarWindow.RestHeight)<1;
                     if(!checks[key+section+"Collapses"])details.Add(new{Failure="Collapse",Section=bar.Section.ToString(),Requested=section.ToString(),bar.Height,bar.ActualHeight,bar.SurfaceUpdates,bar.Repositions});

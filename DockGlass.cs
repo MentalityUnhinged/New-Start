@@ -42,14 +42,15 @@ internal sealed class DockGlass:IDisposable
         catch(DllNotFoundException){native=false;}catch(EntryPointNotFoundException){native=false;}
         if(!native&&handle!=IntPtr.Zero)UpdateBackdrop(handle,0,false);
         visible=native&&prefs.MenuBlur>0;
-        double opacity=native?1-prefs.StartTransparency:1;
-        if(high){Surface.Background=SystemColors.WindowBrush;Surface.BorderBrush=SystemColors.WindowTextBrush;}
-        else
-        {
-            var tint=new LinearGradientBrush(dark?Color.FromRgb(58,64,75):Colors.White,dark?Color.FromRgb(22,26,34):Color.FromRgb(210,219,232),90){Opacity=opacity};tint.Freeze();Surface.Background=tint;
-            var rim=new LinearGradientBrush(Color.FromArgb(dark?(byte)170:(byte)240,255,255,255),dark?Color.FromArgb(65,205,216,235):Color.FromArgb(85,80,95,120),90){Opacity=opacity};rim.Freeze();Surface.BorderBrush=rim;
-        }
+        var material=Material(prefs,native);Surface.Background=material.Tint;Surface.BorderBrush=material.Rim;
         previous=key;
+    }
+    internal static (Brush Tint,Brush Rim) Material(Preferences prefs,bool native)
+    {
+        if(SystemParameters.HighContrast)return(SystemColors.WindowBrush,SystemColors.WindowTextBrush);
+        bool dark=Appearance.IsDark(prefs.Theme);double opacity=native?1-prefs.StartTransparency:1;
+        var tint=new LinearGradientBrush(dark?Color.FromRgb(58,64,75):Colors.White,dark?Color.FromRgb(22,26,34):Color.FromRgb(210,219,232),90){Opacity=opacity};tint.Freeze();
+        var rim=new LinearGradientBrush(Color.FromArgb(dark?(byte)170:(byte)240,255,255,255),dark?Color.FromArgb(65,205,216,235):Color.FromArgb(85,80,95,120),90){Opacity=opacity};rim.Freeze();return(tint,rim);
     }
     public void Dispose(){if(handle!=IntPtr.Zero){DestroyBackdrop(handle);handle=IntPtr.Zero;}}
 }

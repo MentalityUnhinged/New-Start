@@ -75,7 +75,7 @@ internal sealed class AdaptiveAppBarWindow:Window
     readonly Grid root=new(),header=new();readonly StackPanel body=new(){Margin=new Thickness(16,12,16,14)};
     readonly ScrollViewer bodyScroll=new(){VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
     readonly Border bodyHit=new(){Background=Brushes.Transparent,HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Top,ClipToBounds=true};
-    readonly DockGlass restingGlass=new(){MaximumCornerRadius=0},expandedGlass=new(){MaximumCornerRadius=12};
+    readonly AppBarMaterial material=new();
     readonly Preferences surfacePrefs=new(){DockBackground=true};
     readonly TextBlock application=new(){Text="Desktop",MaxWidth=260,TextTrimming=TextTrimming.CharacterEllipsis};
     readonly Image applicationIcon=new(){Width=16,Height=16,Margin=new Thickness(0,0,7,0)};
@@ -85,24 +85,39 @@ internal sealed class AdaptiveAppBarWindow:Window
     readonly Dictionary<AppBarSection,Button> buttons=new();
     readonly StackPanel windowControls=new(){Orientation=Orientation.Horizontal};
     Button clock=null!,media=null!,audio=null!,network=null!,bluetooth=null!;
-    DockReservation? reservation;HwndSource? source;AppBarSection current;double expandedWidth=420,expandedLeft;bool closing,repositioning;int appIconVersion;
+    DockReservation? reservation;HwndSource? source;AppBarSection current;double expandedWidth=420;bool closing,repositioning;int appIconVersion;
     bool? dark;bool highContrast;
     int animationGeneration;
+    double targetExtra=1;
+    static readonly DependencyProperty LobeCentreProperty=DependencyProperty.Register("LobeCentre",typeof(double),typeof(AdaptiveAppBarWindow),new PropertyMetadata(0d,(owner,_)=>((AdaptiveAppBarWindow)owner).UpdateSurface()));
+    static readonly DependencyProperty LobeWidthProperty=DependencyProperty.Register("LobeWidth",typeof(double),typeof(AdaptiveAppBarWindow),new PropertyMetadata(44d,(owner,_)=>((AdaptiveAppBarWindow)owner).UpdateSurface()));
     Slider? volumeSlider;Button? muteButton;TextBlock? audioStatus;bool syncingVolume;
     TextBlock? networkStatus;
+    DateTime calendarMonth=new(DateTime.Today.Year,DateTime.Today.Month,1),calendarSelection=DateTime.Today;
     internal AppBarSection Section=>current;
     internal bool Testing {get;set;}
     internal double ReservedHeight=>RestHeight;
     internal long SurfaceUpdates {get;private set;}
     internal long Repositions {get;private set;}
-    internal bool BlurVisible=>restingGlass.NativeVisible;
-    internal double MaterialOpacity=>restingGlass.TintOpacity;
+    internal bool BlurVisible=>material.NativeVisible;
+    internal double MaterialOpacity=>material.TintOpacity;
+    internal bool HasContinuousMaterial
+    {
+        get
+        {
+            if(material.Surface.Data is not Geometry outline||outline.GetFlattenedPathGeometry().Figures.Count!=1)return false;
+            if(!material.NativeVisible)return true;
+            double y=RestHeight+(ActualHeight-RestHeight)/2;
+            for(int i=0;i<24;i++){var point=new Point(ActualWidth*(i+.5)/24,y);if(outline.FillContains(point)!=material.NativeContains(point))return false;}
+            return material.NativeContains(new Point(ActualWidth/2,RestHeight/2));
+        }
+    }
     internal bool ClockIsCentered=>!Prefs.AppBarClock||Math.Abs(clock.TranslatePoint(new Point(clock.ActualWidth/2,0),this).X-ActualWidth/2)<1;
     internal DockReservation.Rect ReservedBounds=>reservation?.Bounds??default;
     internal AdaptiveAppBarWindow(AdaptiveAppBars owner,DesktopDisplay display)
     {
         host=owner;Display=display;Title="New Start Adaptive AppBar (Beta)";WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;AllowsTransparency=true;Background=Brushes.Transparent;Topmost=true;ShowInTaskbar=false;ShowActivated=false;Height=RestHeight;Width=600;
-        Content=root;root.Children.Add(restingGlass.Surface);root.Children.Add(expandedGlass.Surface);root.Children.Add(bodyHit);root.Children.Add(header);
+        Content=root;root.Children.Add(material.Surface);root.Children.Add(bodyHit);root.Children.Add(header);
         header.Height=RestHeight;header.VerticalAlignment=VerticalAlignment.Top;header.Background=new SolidColorBrush(Color.FromArgb(1,0,0,0));header.Margin=new Thickness(8,0,8,0);
         header.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});header.ColumnDefinitions.Add(new ColumnDefinition());header.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
         var left=new StackPanel{Orientation=Orientation.Horizontal};header.Children.Add(left);
@@ -130,7 +145,7 @@ internal sealed class AdaptiveAppBarWindow:Window
         };
         SizeChanged+=(_,_)=>UpdateSurface();clockTimer.Tick+=(_,_)=>UpdateClock();
         Closed+=(_,_)=>{
-            closing=true;clockTimer.Stop();leaveTimer.Stop();hoverTimer.Stop();source?.RemoveHook(Hook);reservation?.Dispose();restingGlass.Dispose();expandedGlass.Dispose();
+            closing=true;clockTimer.Stop();leaveTimer.Stop();hoverTimer.Stop();source?.RemoveHook(Hook);reservation?.Dispose();material.Dispose();
             host.Applications.Changed-=ApplicationChanged;host.Audio.Changed-=AudioChanged;host.Media.Changed-=MediaChanged;host.Network.Changed-=NetworkChanged;host.Bluetooth.Changed-=BluetoothChanged;
         };
     }
@@ -160,7 +175,7 @@ internal sealed class AdaptiveAppBarWindow:Window
             if(bounds.Right<=bounds.Left){bounds=new(){Left=Display.Bounds.Left,Top=Display.Bounds.Top,Right=Display.Bounds.Right,Bottom=Display.Bounds.Top+(int)Math.Ceiling(RestHeight*scale)};}
             Width=(bounds.Right-bounds.Left)/scale;
             DesktopDisplays.SetWindowPos(hwnd,IntPtr.Zero,bounds.Left,bounds.Top,bounds.Right-bounds.Left,(int)Math.Ceiling(Height*scale),0x0014);
-            expandedWidth=Math.Min(440,Math.Max(100,Width-16));expandedLeft=Math.Clamp(expandedLeft,8,Math.Max(8,Width-expandedWidth-8));UpdateSurface();
+            expandedWidth=Math.Min(440,Math.Max(100,Width-16));UpdateSurface();
         }
         finally{repositioning=false;}
     }
@@ -178,20 +193,26 @@ internal sealed class AdaptiveAppBarWindow:Window
         application.MaxWidth=Math.Clamp(ActualWidth-540,0,260);
         windowControls.Visibility=ActualWidth<720?Visibility.Collapsed:Visibility.Visible;
         media.Visibility=ActualWidth<500?Visibility.Collapsed:Visibility.Visible;
-        restingGlass.Update(this,surfacePrefs,new Rect(0,0,Math.Max(1,ActualWidth),RestHeight));
-        if(Testing)
-        {
-            var hwnd=new WindowInteropHelper(this).Handle;DesktopDisplays.GetWindowRect(hwnd,out var native);
-            var details=new{Handle=hwnd.ToInt64(),ActualWidth,ActualHeight,Height,HeaderHeight=header.ActualHeight,HeaderOrigin=header.PointToScreen(new Point()),HeaderVisible=header.IsVisible,Opacity,WindowState,Native=new{native.Left,native.Top,native.Right,native.Bottom},Section=current.ToString(),Buttons=buttons.Select(pair=>new{Section=pair.Key.ToString(),Origin=pair.Value.PointToScreen(new Point()),pair.Value.ActualWidth,pair.Value.ActualHeight})};
-            System.IO.File.WriteAllText(System.IO.Path.Combine(Preferences.Folder,"appbar-preview-layout.json"),System.Text.Json.JsonSerializer.Serialize(details));
-        }
         double extra=Math.Max(0,ActualHeight-RestHeight);
-        if(extra<1){expandedGlass.Update(this,surfacePrefs,Rect.Empty);bodyHit.Visibility=Visibility.Collapsed;return;}
-        expandedGlass.Update(this,surfacePrefs,new Rect(expandedLeft,RestHeight-8,expandedWidth,extra+8));
-        bodyHit.Visibility=Visibility.Visible;bodyHit.Width=expandedWidth;bodyHit.Height=extra;bodyHit.Margin=new Thickness(expandedLeft,RestHeight,0,0);
+        double width=Math.Max(1,ActualWidth),lobeWidth=Math.Min(expandedWidth,(double)GetValue(LobeWidthProperty));
+        double left=Math.Clamp((double)GetValue(LobeCentreProperty)-lobeWidth/2,8,Math.Max(8,width-lobeWidth-8));
+        double shoulder=Math.Max(0,Math.Min(16,Math.Min(extra/2,Math.Min(left,width-left-lobeWidth))));
+        double radius=Math.Min(16,Math.Min(extra/2,lobeWidth/2));
+        material.Update(this,surfacePrefs,new AppBarOutline(width,RestHeight,left,lobeWidth,extra,shoulder,radius));
+        if(extra<1){bodyHit.Visibility=Visibility.Collapsed;bodyScroll.Opacity=0;return;}
+        bodyHit.Visibility=Visibility.Visible;bodyHit.Width=lobeWidth;bodyHit.Height=extra;bodyHit.Margin=new Thickness(left,RestHeight,0,0);
+        bodyScroll.Width=expandedWidth;bodyScroll.HorizontalAlignment=HorizontalAlignment.Center;
+        bodyScroll.Opacity=Math.Clamp((extra/Math.Max(1,targetExtra)-.3)/.7,0,1);
+    }
+    void Morph(DependencyProperty property,double target,bool animate)
+    {
+        double from=(double)GetValue(property);BeginAnimation(property,null);SetValue(property,target);
+        if(animate&&Prefs.AppBarAnimations&&SystemParameters.ClientAreaAnimation&&Prefs.AppBarAnimationMilliseconds>0)
+            BeginAnimation(property,new DoubleAnimation(from,target,TimeSpan.FromMilliseconds(Prefs.AppBarAnimationMilliseconds)){EasingFunction=new CubicEase{EasingMode=EasingMode.EaseOut},FillBehavior=FillBehavior.Stop},HandoffBehavior.SnapshotAndReplace);
     }
     void AnimateHeight(double height,bool animate=true)
     {
+        if(height>RestHeight)targetExtra=height-RestHeight;
         int version=++animationGeneration;
         double from=ActualHeight;BeginAnimation(HeightProperty,null);Height=height;
         if(animate&&Prefs.AppBarAnimations&&SystemParameters.ClientAreaAnimation&&Prefs.AppBarAnimationMilliseconds>0)
@@ -204,9 +225,12 @@ internal sealed class AdaptiveAppBarWindow:Window
     internal void Toggle(AppBarSection section){if(current==section)Collapse();else Expand(section);}
     internal void Expand(AppBarSection section)
     {
+        bool opening=current==AppBarSection.None&&ActualHeight<=RestHeight+1;
         host.CollapseOthers(this);hoverTimer.Stop();leaveTimer.Stop();current=section;
         expandedWidth=Math.Min(440,Math.Max(100,ActualWidth-16));
-        if(buttons.TryGetValue(section,out var button)){var point=button.TranslatePoint(new Point(button.ActualWidth/2,0),this);expandedLeft=Math.Clamp(point.X-expandedWidth/2,8,Math.Max(8,ActualWidth-expandedWidth-8));}
+        double anchor=ActualWidth/2;
+        if(buttons.TryGetValue(section,out var button))anchor=button.TranslatePoint(new Point(button.ActualWidth/2,0),this).X;
+        Morph(LobeCentreProperty,anchor,!opening);Morph(LobeWidthProperty,expandedWidth,true);
         BuildBody();FitExpansion();UpdateSurface();
         if(section==AppBarSection.Network)_=host.Network.Refresh(true);
     }
@@ -214,11 +238,11 @@ internal sealed class AdaptiveAppBarWindow:Window
     {
         if(current==AppBarSection.None)return;
         double limit=current switch{AppBarSection.Media=>220,AppBarSection.Audio=>300,AppBarSection.Application=>180,_=>300};
-        body.Measure(new Size(expandedWidth,double.PositiveInfinity));double target=Math.Clamp(body.DesiredSize.Height,44,limit);
+        body.Measure(new Size(expandedWidth,double.PositiveInfinity));double target=Math.Clamp(Math.Ceiling(body.DesiredSize.Height)+4,44,limit);
         double scale=VisualTreeHelper.GetDpi(this).DpiScaleY;double maximum=(Display.Bounds.Bottom-Display.Bounds.Top)/scale-RestHeight-24;
         double height=RestHeight+Math.Max(40,Math.Min(target,maximum));if(Math.Abs(Height-height)>.5)AnimateHeight(height);
     }
-    internal void Collapse(bool animate=true){if(current==AppBarSection.None&&Height==RestHeight)return;current=AppBarSection.None;hoverTimer.Stop();leaveTimer.Stop();AnimateHeight(RestHeight,animate);}
+    internal void Collapse(bool animate=true){if(current==AppBarSection.None&&Height==RestHeight)return;current=AppBarSection.None;hoverTimer.Stop();leaveTimer.Stop();Morph(LobeWidthProperty,44,animate);AnimateHeight(RestHeight,animate);}
     void Text(string value,double size=13){body.Children.Add(new TextBlock{Text=value,FontSize=size,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,8)});}
     Button Action(string label,Action action,Panel? parent=null,bool enabled=true){var button=new Button{Content=label,IsEnabled=enabled,Margin=new Thickness(0,0,6,6),Padding=new Thickness(10,6,10,6)};button.Click+=(_,_)=>action();(parent??body).Children.Add(button);return button;}
     internal static void Open(string uri){try{Process.Start(new ProcessStartInfo(uri){UseShellExecute=true});}catch(Exception e){MessageBox.Show(e.Message,"New Start");}}
@@ -271,12 +295,42 @@ internal sealed class AdaptiveAppBarWindow:Window
                 foreach(var device in host.Bluetooth.Devices)Text(device.Name+" · "+(device.Connected is true?"Connected":device.Connected is false?"Not connected":"Paired; connection state unavailable"),12);
                 Text("Connections depend on the device's Bluetooth profile. Windows manages devices without a supported connection adapter.",12);Action("Device connection options",()=>Open("ms-settings:bluetooth"));break;
             case AppBarSection.Clock:
-                Text(DateTime.Now.ToString("D",CultureInfo.CurrentCulture),14);var calendar=new System.Windows.Controls.Calendar{SelectedDate=DateTime.Today,DisplayDate=DateTime.Today};body.Children.Add(calendar);break;
+                Text(calendarSelection.ToString("D",CultureInfo.CurrentCulture),14);BuildCalendar();break;
             case AppBarSection.Application:
                 var app=host.Applications.Current;Text(app?.Title??"Desktop",14);Text(host.Borderless.Feedback,12);
                 if(app!=null)Action("Exclude this app from borderless management",()=>{if(!Prefs.BorderlessExclusions.Contains(app.Path,StringComparer.OrdinalIgnoreCase))Prefs.BorderlessExclusions.Add(app.Path);Prefs.Save();host.Borderless.Update();BuildBody();});break;
         }
         if(IsLoaded)FitExpansion();
+    }
+    void BuildCalendar()
+    {
+        var navigation=new Grid{Margin=new Thickness(0,0,0,8)};
+        navigation.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(34)});navigation.ColumnDefinitions.Add(new ColumnDefinition());navigation.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(34)});
+        var title=new TextBlock{Text=calendarMonth.ToString("Y",CultureInfo.CurrentCulture),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(title,1);navigation.Children.Add(title);
+        foreach(int direction in new[]{-1,1})
+        {
+            int step=direction;var arrow=new Button{Content=step<0?"‹":"›",Height=28,Padding=new Thickness(4),ToolTip=step<0?"Previous month":"Next month"};StartMenuWindow.Borderless(arrow);
+            System.Windows.Automation.AutomationProperties.SetName(arrow,step<0?"Previous month":"Next month");
+            arrow.Click+=(_,_)=>{if((step<0&&calendarMonth>new DateTime(1,1,1))||(step>0&&calendarMonth<new DateTime(9999,12,1))){calendarMonth=calendarMonth.AddMonths(step);BuildBody();}};
+            Grid.SetColumn(arrow,step<0?0:2);navigation.Children.Add(arrow);
+        }
+        body.Children.Add(navigation);
+        var days=new System.Windows.Controls.Primitives.UniformGrid{Columns=7};body.Children.Add(days);
+        int first=(int)CultureInfo.CurrentCulture.DateTimeFormat.FirstDayOfWeek;
+        for(int column=0;column<7;column++)days.Children.Add(new TextBlock{Text=CultureInfo.CurrentCulture.DateTimeFormat.AbbreviatedDayNames[(first+column)%7],FontSize=11,Opacity=.65,TextAlignment=TextAlignment.Center,Margin=new Thickness(0,0,0,5)});
+        int offset=((int)calendarMonth.DayOfWeek-first+7)%7,count=DateTime.DaysInMonth(calendarMonth.Year,calendarMonth.Month);
+        int cells=((offset+count+6)/7)*7;
+        for(int cell=0;cell<cells;cell++)
+        {
+            int number=cell-offset+1;
+            if(number<1||number>count){days.Children.Add(new Border());continue;}
+            var date=new DateTime(calendarMonth.Year,calendarMonth.Month,number);
+            var label=new TextBlock{Text=number.ToString(CultureInfo.CurrentCulture),FontSize=12,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
+            var face=new Border{Width=30,Height=28,CornerRadius=new CornerRadius(8),Child=label,BorderThickness=new Thickness(date==DateTime.Today?1:0)};face.SetResourceReference(Border.BorderBrushProperty,"Accent");
+            if(date==calendarSelection)face.Background=new SolidColorBrush(Color.FromArgb(50,SystemParameters.WindowGlassColor.R,SystemParameters.WindowGlassColor.G,SystemParameters.WindowGlassColor.B));
+            var day=new Button{Content=face,Padding=new Thickness(0),Height=30,ToolTip=date.ToString("D",CultureInfo.CurrentCulture)};StartMenuWindow.Borderless(day);System.Windows.Automation.AutomationProperties.SetName(day,date.ToString("D",CultureInfo.CurrentCulture));
+            day.Click+=(_,_)=>{calendarSelection=date;BuildBody();};days.Children.Add(day);
+        }
     }
     void AudioChanged()
     {
