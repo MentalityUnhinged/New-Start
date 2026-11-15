@@ -40,7 +40,7 @@ internal sealed class BorderlessManager:IDisposable
             if(!prefs.AppBarEnabled||!prefs.BorderlessWindows||live==null||!live.Maximized||live.Fullscreen||excluded)
             {if(Restore(saved)){changed.Remove(saved);active.Unwatch(new IntPtr(saved.Handle));}}
         }
-        if(!prefs.AppBarEnabled||!prefs.BorderlessWindows){Feedback="Borderless management is off.";Persist();if(changed.Count==0)StopGuardian();return;}
+        if(!prefs.AppBarEnabled||!prefs.BorderlessWindows){Feedback=changed.Count==0?"Borderless management is off.":$"Disabled; {changed.Count} window(s) still need frame recovery. Retry recovery or close and reopen those applications.";Persist();if(changed.Count==0)StopGuardian();return;}
         var window=DiagnosticWindow==IntPtr.Zero?active.Current:ActiveApplication.Read(DiagnosticWindow);
         if(window==null||!window.Maximized||window.Fullscreen){Feedback="Only compatible maximised windows are managed.";Persist();return;}
         if(changed.Any(item=>item.Handle==window.Handle.ToInt64())){Feedback="Standard title bar managed; restoring the window restores its frame.";return;}
