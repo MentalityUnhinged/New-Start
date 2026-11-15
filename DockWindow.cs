@@ -30,7 +30,7 @@ public sealed partial class DockWindow : Window
     bool suppressSettingsPersistence;
     DockReservation? reservation;
     RecycleBinWatcher? recycleWatcher;
-    TaskbarEdgeShield? taskbarEdgeShield;
+    TaskbarSuppression? taskbarSuppression;
     MenuItem? emptyRecycleItem;
     readonly DockPins dockPins;
     readonly Grid dockSurface=new();
@@ -153,7 +153,7 @@ public sealed partial class DockWindow : Window
         WallpaperPalette? wallpaper=null;
         Loaded+=(_,_)=>{
             wallpaper=new WallpaperPalette(Dispatcher);wallpaper.Changed+=WallpaperChanged;
-            taskbarEdgeShield=new TaskbarEdgeShield(this,prefs);
+            taskbarSuppression=new TaskbarSuppression(this,prefs);
             TaskbarPins.Refresh();
             RecycleBinIcon.Changed+=RecycleChanged;recycleWatcher=new RecycleBinWatcher(this);RecycleBinIcon.Refresh();
             Refresh(); Position();
@@ -168,8 +168,8 @@ public sealed partial class DockWindow : Window
         // Windows can move a window after an AppBar work-area change. Restore
         // the edge-relative position after that notification has settled.
         LocationChanged+=(_,_)=>QueuePosition();
-        timer.Tick+=(_,_)=>{ Refresh(); Position();taskbarEdgeShield?.Refresh(); clock.Text=DateTime.Now.ToString(prefs.Edge==DockEdge.Left?"HH\nmm":"t"); _=StartCatalog.Refresh();RecycleBinIcon.Refresh();TaskbarPins.Refresh(); };
-        Closed+=(_,_)=>{taskbarEdgeShield?.Dispose(); if(wallpaper!=null){wallpaper.Changed-=WallpaperChanged;wallpaper.Dispose();}timer.Stop(); tray.IsOpen=false;appBars?.Dispose();appBars=null; startMenu?.Close();dockGlass.Dispose();recycleWatcher?.Dispose();RecycleBinIcon.Changed-=RecycleChanged;reservation?.Dispose(); };
+        timer.Tick+=(_,_)=>{ Refresh(); Position();taskbarSuppression?.Refresh(); clock.Text=DateTime.Now.ToString(prefs.Edge==DockEdge.Left?"HH\nmm":"t"); _=StartCatalog.Refresh();RecycleBinIcon.Refresh();TaskbarPins.Refresh(); };
+        Closed+=(_,_)=>{taskbarSuppression?.Dispose(); if(wallpaper!=null){wallpaper.Changed-=WallpaperChanged;wallpaper.Dispose();}timer.Stop(); tray.IsOpen=false;appBars?.Dispose();appBars=null; startMenu?.Close();dockGlass.Dispose();recycleWatcher?.Dispose();RecycleBinIcon.Changed-=RecycleChanged;reservation?.Dispose(); };
         PreviewKeyDown+=(_,e)=>{if(e.Key==Key.Escape&&!dragging){controlsKeyboardDismiss=tray.IsOpen;tray.IsOpen=false;controlsDismissedByIcon=false;startMenu?.Dismiss();e.Handled=true;}};
     }
     void RecycleChanged()
@@ -691,8 +691,8 @@ public sealed partial class DockWindow : Window
         Toggle("White running indicators",prefs.Indicators,v=>{prefs.Indicators=v;Refresh(true);});
         var clocks=new ComboBox{ItemsSource=new[]{"Clock hidden","Clock in panel","Clock always visible"},SelectedIndex=prefs.Clock};clocks.SelectionChanged+=(_,_)=>{prefs.Clock=clocks.SelectedIndex;Refresh(true);};panel.Children.Add(clocks);
         Section("Applications & Windows");
-        Toggle("Block Windows taskbar auto-hide edge",prefs.BlockTaskbarEdgeReveal,v=>{prefs.BlockTaskbarEdgeReveal=v;taskbarEdgeShield?.Refresh();Save();if(taskbarEdgeShield?.Error is {} error)MessageBox.Show(dialog,error,"New Start");});
-        panel.Children.Add(new TextBlock{Text="Intercepts the taskbar’s mouse reveal strip. Keyboard access to Explorer stays available. Fullscreen apps are left alone.",TextWrapping=TextWrapping.Wrap,Opacity=.7,FontSize=12,Margin=new Thickness(0,3,0,8)});
+        Toggle("Suppress Windows taskbar pointer reveal",prefs.BlockTaskbarEdgeReveal,v=>{prefs.BlockTaskbarEdgeReveal=v;taskbarSuppression?.Refresh();Save();if(taskbarSuppression?.Error is {} error)MessageBox.Show(dialog,error,"New Start");});
+        panel.Children.Add(new TextBlock{Text="Keeps the Windows taskbar hidden until you press a Windows key. Official Start and taskbar access remain available; suppression resumes after you leave them.",TextWrapping=TextWrapping.Wrap,Opacity=.7,FontSize=12,Margin=new Thickness(0,3,0,8)});
         panel.Children.Add(new TextBlock{Text=$"Windows taskbar auto-hide: {(Native.AutoHide?"enabled":"disabled")}",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,12)});
         Section("Dock");var pin=new Button{Content="Pin an application…",Margin=new Thickness(0,4,0,4)};pin.Click+=(_,_)=>{var f=new OpenFileDialog{Filter="Applications and shortcuts|*.exe;*.lnk;*.appref-ms"};if(f.ShowDialog(dialog)==true){dockPins.Place(f.FileName,dockPins.All().Count);Save();Refresh(true);}};panel.Children.Add(pin);
         Section("Windows");

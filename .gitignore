@@ -24,3 +24,6 @@ Pins/
 palettes/
 fixture-*.txt
 palette-fixture-*.png
+
+taskbar-recovery.json
+taskbar-test-*.json

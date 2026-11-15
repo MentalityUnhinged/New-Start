@@ -8,6 +8,11 @@ public static class Program
 {
     [STAThread] public static void Main(string[] args)
     {
+        if(args.Length==4&&args[0]=="--taskbar-guardian"&&int.TryParse(args[1],out int taskbarOwner)&&long.TryParse(args[2],out long taskbarStarted)){TaskbarSuppression.Guard(taskbarOwner,taskbarStarted,args[3]);return;}
+        if(args.Length==2&&args[0]=="--taskbar-suppression-crash-test"&&Guid.TryParseExact(args[1],"N",out _))
+        {
+            var suppressionFixtureApp=new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};suppressionFixtureApp.Startup+=async(_,_)=>await TaskbarSuppressionValidation.CrashFixture(args[1]);suppressionFixtureApp.Run();return;
+        }
         if(args.Length==1&&args[0]=="--capability-worker"){CapabilityWorker.Run();return;}
         if(args.Length==3&&args[0]=="--context-fixture"){ContextValidation.Fixture(args[1],args[2]=="slow");return;}
         if(args.Length==1&&args[0]=="--verify-capability-inventory")
@@ -24,6 +29,11 @@ public static class Program
         using var single = new Mutex(true, "NewStart.User." + Environment.UserName, out bool first);
         if (!first) return;
         BorderlessManager.Recover();
+        TaskbarSuppression.Recover();
+        if(args.Length==1&&args[0]=="--verify-taskbar-suppression")
+        {
+            var validation=new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};validation.Startup+=async(_,_)=>{try{await TaskbarSuppressionValidation.Run();validation.Shutdown();}catch{validation.Shutdown(1);}};validation.Run();return;
+        }
         if(args.Length==1&&args[0]=="--verify-context-appearance")
         {
             var validation=new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};
