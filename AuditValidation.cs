@@ -59,6 +59,8 @@ internal static class AuditValidation
         var menu=ThemedMenus.Create(prefs);var otherMenu=ThemedMenus.Create(prefs);
         checks["MenuStylesShared"]=ReferenceEquals(menu.Resources.MergedDictionaries[0],otherMenu.Resources.MergedDictionaries[0]);
         first.Close();second.Close();
+        BackgroundLinkValidation.Run(checks);
+        TaskbarEdgeValidation.Run(checks);
         Directory.CreateDirectory(Preferences.Folder);
         File.WriteAllText(Path.Combine(Preferences.Folder,"audit-verification.json"),JsonSerializer.Serialize(checks,new JsonSerializerOptions{WriteIndented=true}));
         if(checks.Values.Any(passed=>!passed))throw new InvalidOperationException("Audit regression checks failed.");

@@ -20,3 +20,5 @@ Preferences and caches are created under `%LOCALAPPDATA%/NewStart`. They are not
 AppBar reuses Start through a reversible content lease and shares the Settings content factory. Expansion cleanup detaches content before restoring its standalone host. AppBarBattery uses GetSystemPowerStatus and registered power notifications, unregistered at disposal.
 
 ApplicationIdentity resolves frame/content identities and metadata; ApplicationCapabilities owns per-window discovery, caches and safe execution. Its hidden MTA UIA helper has a hard process timeout. SurfaceAppearance handles shared colour/alpha/contrast; WallpaperPalette resolves per-display files and cached clusters; BackgroundSettings provides both editors. See [context and colour](CONTEXT-AND-COLOUR.md).
+
+Preferences synchronises the independently linked background groups and notifies both BackgroundSettings editors. TaskbarEdgeShield owns minimal native layered input HWNDs; it does not use the expansion material or change Explorer state. Its lifetime follows DockWindow, with foreground/display/Explorer notifications and the existing dock refresh fallback.

@@ -14,6 +14,25 @@ public sealed class Preferences
     public double StartTransparency { get; set; } = .8;
     public double MenuBlur { get; set; } = 16;
     public bool DockBackground {get;set;}=false;
+    public bool LinkBackgroundEffects {get;set;}
+    public bool LinkBackgroundColours {get;set;}
+    internal event Action? BackgroundSettingsChanged;
+    internal void SynchroniseBackgrounds(bool fromAppBar,bool notify=true)
+    {
+        if(LinkBackgroundEffects)
+        {
+            double transparency=SurfaceAppearance.Transparency(this,fromAppBar),blur=SurfaceAppearance.Blur(this,fromAppBar);
+            DockTransparency=AppBarTransparency=transparency;DockBlur=AppBarBlur=blur;
+        }
+        if(LinkBackgroundColours)
+        {
+            int source=fromAppBar?AppBarColourSource:DockColourSource,strategy=fromAppBar?AppBarWallpaperStrategy:DockWallpaperStrategy;
+            string colour=fromAppBar?AppBarColour:DockColour,fallback=fromAppBar?AppBarWallpaperFallback:DockWallpaperFallback;
+            DockColourSource=AppBarColourSource=source;DockWallpaperStrategy=AppBarWallpaperStrategy=strategy;
+            DockColour=AppBarColour=colour;DockWallpaperFallback=AppBarWallpaperFallback=fallback;
+        }
+        if(notify)BackgroundSettingsChanged?.Invoke();
+    }
     public double? DockTransparency {get;set;}
     public double? DockBlur {get;set;}
     public int DockColourSource {get;set;} // System, Custom, Wallpaper automatic, Wallpaper palette
@@ -44,6 +63,7 @@ public sealed class Preferences
     public bool ShowTaskView { get; set; } = true;
     public bool ShowDesktop { get; set; } = true;
     public bool ReserveDockSpace { get; set; } = true;
+    public bool BlockTaskbarEdgeReveal {get;set;}
     public bool FollowWindowsTaskbarPins { get; set; } = true;
     public List<string> HiddenTaskbarPins {get;set;}=new();
     public List<string> HiddenStartPins {get;set;}=new();
@@ -101,6 +121,7 @@ public sealed class Preferences
         StartTransparency=Number(StartTransparency,0,1,.8,2);MenuBlur=Number(MenuBlur,0,60,16,2);
         HoverMilliseconds=Number(HoverMilliseconds,0,1000,150);BounceHeight=Number(BounceHeight,0,30,10);BounceMilliseconds=Number(BounceMilliseconds,100,2000,650);
         Pins=Paths(Pins);HiddenTaskbarPins=Paths(HiddenTaskbarPins);DockPinOrder=Paths(DockPinOrder);HiddenStartPins=Paths(HiddenStartPins);StartPins=Paths(StartPins);
+        SynchroniseBackgrounds(true,false);
     }
     public void Save()
     {

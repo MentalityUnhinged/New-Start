@@ -45,7 +45,13 @@ internal static class BackgroundSettings
             strategy.Visibility=(appBar?prefs.AppBarColourSource:prefs.DockColourSource)==2?Visibility.Visible:Visibility.Collapsed;
         }
         void SetChannels(Color colour){syncing=true;hex.Text=SurfaceAppearance.Hex(colour);channels[0].Value=colour.R;channels[1].Value=colour.G;channels[2].Value=colour.B;for(int i=0;i<3;i++)numbers[i].Text=channels[i].Value.ToString("0");syncing=false;}
-        void Commit(){Preview();apply();}
+        void Commit(){prefs.SynchroniseBackgrounds(appBar);Preview();apply();}
+        void SynchroniseControls()
+        {
+            syncing=true;sources.SelectedIndex=appBar?prefs.AppBarColourSource:prefs.DockColourSource;strategy.SelectedIndex=appBar?prefs.AppBarWallpaperStrategy:prefs.DockWallpaperStrategy;
+            transparency.Value=SurfaceAppearance.Transparency(prefs,appBar)*100;blur.Value=SurfaceAppearance.Blur(prefs,appBar)/.6;
+            SurfaceAppearance.TryHex(appBar?prefs.AppBarColour:prefs.DockColour,out var colour);SetChannels(colour);Preview();
+        }
         void Select(Color colour,int source){if(appBar){prefs.AppBarColour=SurfaceAppearance.Hex(colour);prefs.AppBarColourSource=source;}else{prefs.DockColour=SurfaceAppearance.Hex(colour);prefs.DockColourSource=source;}SetChannels(colour);syncing=true;sources.SelectedIndex=source;syncing=false;error.Text="";Commit();}
         void Palette()
         {
@@ -64,7 +70,7 @@ internal static class BackgroundSettings
         blur.ValueChanged+=(_,_)=>{if(syncing)return;if(appBar)prefs.AppBarBlur=Math.Round(blur.Value)*.6;else prefs.DockBlur=Math.Round(blur.Value)*.6;Commit();};
         reset.Click+=(_,_)=>{syncing=true;sources.SelectedIndex=0;strategy.SelectedIndex=0;transparency.Value=80;blur.Value=27;syncing=false;if(appBar){prefs.AppBarColourSource=0;prefs.AppBarWallpaperStrategy=0;prefs.AppBarColour="#000000";prefs.AppBarTransparency=.8;prefs.AppBarBlur=16.2;}else{prefs.DockColourSource=0;prefs.DockWallpaperStrategy=0;prefs.DockColour="#000000";prefs.DockTransparency=.8;prefs.DockBlur=16.2;}SetChannels(Colors.Black);Commit();};
         SurfaceAppearance.TryHex(appBar?prefs.AppBarColour:prefs.DockColour,out var initial);SetChannels(initial);Palette();
-        root.Loaded+=(_,_)=>{if(WallpaperPalette.Current is {} service)service.Changed+=Palette;Palette();};root.Unloaded+=(_,_)=>{if(WallpaperPalette.Current is {} service)service.Changed-=Palette;};
+        root.Loaded+=(_,_)=>{prefs.BackgroundSettingsChanged+=SynchroniseControls;if(WallpaperPalette.Current is {} service)service.Changed+=Palette;SynchroniseControls();Palette();};root.Unloaded+=(_,_)=>{prefs.BackgroundSettingsChanged-=SynchroniseControls;if(WallpaperPalette.Current is {} service)service.Changed-=Palette;};
         return root;
     }
 }
