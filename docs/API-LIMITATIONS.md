@@ -1,6 +1,6 @@
 # Windows API boundaries
 
-- **Reservation:** public [Shell AppBar APIs](https://learn.microsoft.com/en-us/windows/win32/shell/application-desktop-toolbars) reserve a strip on the selected edge. The current implementation targets the primary display. Existing Explorer reservation is respected.
+- **Reservation:** public [Shell AppBar APIs](https://learn.microsoft.com/en-us/windows/win32/shell/application-desktop-toolbars) reserve a strip on the selected edge. The dock targets the primary display; Adaptive AppBar hosts reserve a fixed resting strip per configured display. Existing Explorer reservation is respected; expanded controls never enlarge the reservation.
 - **Windows taskbar pins:** Windows has no public general-purpose pin enumeration contract. New Start reads the current user's TaskBar shortcuts and matches known identities against Taskband data without writing it. This compatibility adapter may require updates on new Windows builds.
 - **Start pins:** Windows PowerShell `Export-StartLayout` supplies a read-only snapshot where supported. The last synced list is retained locally if export fails. Local New Start additions/exclusions are overlaid on that snapshot and never write Windows Start's pin database. Unpinning keeps the application in All Apps/search; pinning it again removes the exclusion. Windows Start folders and some newer pin formats may be unsupported.
 - **All Apps:** `shell:AppsFolder` lists shell-registered desktop and packaged apps; unregistered executables are not automatically discoverable. Explicit local pins can still launch them.
@@ -9,4 +9,6 @@
 - **Backdrop:** custom Windows Composition blur supports a variable radius; at zero the native companion is hidden entirely. Windows transparency/high-contrast preferences take precedence. Native graphics cost varies by driver/session; no universal performance claim is made.
 - **Tray/account/system integration:** app tray hosting is not implemented. Account display name/avatar and Known Folders are looked up locally, with generic fallbacks. The physical Windows key remains under Windows control.
 
-No administrator access, Explorer injection, private shell writes, taskbar hiding, or complete shell-parity claim is part of this preview.
+Adaptive AppBar integrates native media/Core Audio/WLAN/Bluetooth services. Permissions, Bluetooth profile limitations, the isolated private audio-output compatibility adapter and the conservative standard-frame caption subsystem are documented in [its API and recovery boundaries](ADAPTIVE-APPBAR.md). Caption restoration journals are written before mutation and recovered by an independent helper/startup path; arbitrary custom title bars are not supported.
+
+No administrator access, Explorer injection, taskbar hiding, or complete shell-parity claim is part of this preview. Windows Start/taskbar pin databases remain read-only.

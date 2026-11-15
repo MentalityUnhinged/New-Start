@@ -23,6 +23,8 @@ New Start is an experimental native Windows 11 dock and custom Start menu, built
 - Right-click Start apps to pin them to the dock or pin/unpin them in New Start. Local Start changes persist without editing Windows Start pins; removed apps remain available in All Apps/search.
 - Light/Dark/System appearance, adjustable menu transparency and blur, optional clock, system controls, Task View and Show Desktop, plus the Windows Recycle Bin with live empty/full icons and an Empty action using Windows confirmation.
 - Account display name/avatar and standard folder/settings shortcuts, resolved locally at runtime.
+- Optional [Adaptive AppBar](docs/ADAPTIVE-APPBAR.md): per-display resting reservation, attached adaptive controls, media sessions/artwork, native volume/mute, Wi-Fi discovery/profiles, Bluetooth radio/paired-device state, clock/calendar and active-window controls. Shared colour theme with separate AppBar blur/transparency sliders.
+- Experimental standard-frame borderless management, off by default, with per-app exclusions, original-style journal, independent recovery helper and startup/manual recovery.
 
 ## Screenshots
 
@@ -70,6 +72,8 @@ Right-click blank dock space → **New Start settings**. Select the dock edge an
 | Start and app discovery | `StartMenuWindow.cs`, `StartCatalog.cs` |
 | Native integration | `Native.cs`, `TaskbarPins.cs`, `PinIdentity.cs`, `JumpListReader.cs` |
 | Appearance and blur | `Appearance.cs`, `ThemedMenus.cs`, `CustomBackdrop.cs`, `DockGlass.cs`, `native/Backdrop.cpp` |
+| Adaptive AppBar and system components | `AdaptiveAppBar.cs`, `DesktopDisplays.cs`, `AppBarMedia.cs`, `AppBarAudio.cs`, `AppBarNetwork.cs`, `AppBarBluetooth.cs`, `native/Audio.cpp` |
+| Active windows and safe caption management | `ActiveApplication.cs`, `BorderlessManager.cs` |
 | Local account/folder/Recycle Bin adapters | `AccountIdentity.cs`, `StartShortcuts.cs`, `RecycleBinIcon.cs` |
 | Defaults and persistence | `Preferences.cs` |
 | Original branding | `assets/logo.svg`, `assets/Generate-Icon.ps1` |
@@ -79,7 +83,7 @@ See [architecture](docs/ARCHITECTURE.md), [roadmap](docs/ROADMAP.md), [API limit
 
 ## Current limitations
 
-This is a preview, not a complete Explorer replacement. Primary-monitor placement only; no tray icon hosting, native Jump List custom tasks/pinned documents, badges, task progress or thumbnail previews. The physical Windows key still opens Windows Start. Large pin counts can exceed the available dock length. Blur has a measurable graphics/CPU cost and needs more driver/remote-session testing. Dragging across apps and accessibility require broader acceptance coverage.
+This is a preview, not a complete Explorer replacement. The dock remains primary-monitor only; the AppBar creates per-display hosts, with physical mixed-DPI/hot-plug acceptance still pending. No tray icon hosting, native Jump List custom tasks/pinned documents, badges, task progress or thumbnail previews. The physical Windows key still opens Windows Start. Large pin counts can exceed the available dock length. Blur has a measurable graphics/CPU cost and needs more driver/remote-session testing. Dragging across apps and accessibility require broader acceptance coverage. Bluetooth has no universal device connection adapter; audio output switching uses an isolated undocumented Windows compatibility interface. See [AppBar boundaries and recovery](docs/ADAPTIVE-APPBAR.md).
 
 Windows does not expose a complete public Start/taskbar pin or taskbar-menu API. Compatibility adapters are read-only and can require updates when Windows changes. See [the detailed boundaries](docs/API-LIMITATIONS.md).
 

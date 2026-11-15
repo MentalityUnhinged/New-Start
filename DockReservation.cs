@@ -17,6 +17,7 @@ internal sealed class DockReservation:IDisposable
     [DllImport("user32.dll",CharSet=CharSet.Unicode)]static extern bool GetMonitorInfo(IntPtr monitor,ref MonitorInfo info);
     [DllImport("user32.dll")]static extern bool SetWindowPos(IntPtr window,IntPtr after,int x,int y,int width,int height,uint flags);
     readonly Window owner;readonly HwndSource source;readonly uint callback,recreated;
+    readonly Func<IntPtr>? targetMonitor;
     bool requested,registered,updating,queued,disposed;double dockHeight;
     DockEdge edge;
     internal bool Enabled=>registered;
@@ -26,8 +27,9 @@ internal sealed class DockReservation:IDisposable
         get{var monitor=new MonitorInfo{Size=(uint)Marshal.SizeOf<MonitorInfo>()};if(!GetMonitorInfo(MonitorFromPoint(new Point(),1),ref monitor))throw new InvalidOperationException("Windows did not report a display work area.");return monitor.Work;}
     }
     internal event Action? Changed;
-    internal DockReservation(Window dock)
+    internal DockReservation(Window dock,Func<IntPtr>? monitor=null)
     {
+        targetMonitor=monitor;
         owner=dock;callback=RegisterWindowMessage("NewStart.AppBar.Callback");recreated=RegisterWindowMessage("TaskbarCreated");
         // This hidden HWND owns the screen-wide reservation; only the centred dock is interactive.
         source=new HwndSource(new HwndSourceParameters("NewStart.DockReservation"){WindowStyle=unchecked((int)0x80000000),ExtendedWindowStyle=0x080000A0,Width=0,Height=0});
@@ -44,7 +46,7 @@ internal sealed class DockReservation:IDisposable
         {
             if(!registered){var register=Message();registered=SHAppBarMessage(0,ref register)!=UIntPtr.Zero;if(!registered)return;Bounds=default;}
             var monitor=new MonitorInfo{Size=(uint)Marshal.SizeOf<MonitorInfo>()};
-            if(!GetMonitorInfo(MonitorFromPoint(new Point(),1),ref monitor))return;
+            if(!GetMonitorInfo(targetMonitor?.Invoke()??MonitorFromPoint(new Point(),1),ref monitor))return;
             int pixels=(int)Math.Ceiling(dockHeight*VisualTreeHelper.GetDpi(owner).DpiScaleY);
             var position=Message();position.Bounds=monitor.Monitor;SetThickness(ref position.Bounds,pixels);
             SHAppBarMessage(2,ref position);SetThickness(ref position.Bounds,pixels);
@@ -71,6 +73,7 @@ internal sealed class DockReservation:IDisposable
             if(wParam.ToInt32()==1)QueueUpdate(); // ABN_POSCHANGED
             else if(wParam.ToInt32()==2)owner.Topmost=lParam==IntPtr.Zero; // fullscreen applications
         }
+        else if(message==0x007E||message==0x02E0||message==0x001A)QueueUpdate();
         else if(message==0x0047&&registered){var changed=Message();SHAppBarMessage(9,ref changed);}
         return IntPtr.Zero;
     }

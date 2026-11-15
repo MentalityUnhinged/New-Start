@@ -4,9 +4,13 @@
 
 Native dock and custom Start, original branding, top/left/bottom placement with edge-appropriate alignment, anchored menus, AppBar reservation, configurable sizing/animation, read-only pin import, local drag pinning/reordering/removal, themed settings/context menus, account/folder shortcuts and Explorer fallback.
 
-## Planned: optional macOS-style application bar
+## Delivered Beta: Adaptive AppBar
 
-This is a future feature specification, not functionality included in the current beta.
+The initial Adaptive AppBar is implemented with resting-only reservation, per-display hosts, attached expanding controls, native media/audio/WLAN/Bluetooth integration, clock/calendar, active-window controls and optional conservative caption management with recovery. See [implementation, supported operations and pending acceptance coverage](ADAPTIVE-APPBAR.md). It shares the dock's colour theme and has separate blur/transparency settings.
+
+## Further application-bar integration
+
+The following earlier design notes include delivered foundation behaviour and remaining application-menu work. Universal application menu extraction and general Bluetooth connection adapters are not delivered by the current beta.
 
 - Add an optional top application/menu bar using New Start's Light/Dark/System, transparency, blur and menu styling. It is off by default.
 - When enabled, move the Start circle from the dock to the top bar, with only one Start entry point. Start opens beneath that control; preserve screen centring when the control/layout is centred.

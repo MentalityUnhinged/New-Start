@@ -8,12 +8,17 @@ Build on Windows with `./build.ps1`. Close an existing New Start instance before
 | `--verify-pin-model` | Synthetic pin insertion/order/hide/restore/serialization | Writes a report and exits; no Windows pin edits |
 | `--verify-locations` | Nine edge/alignment combinations, menu bounds, native reservation, top-centre centring, default/fallback geometry | Temporarily moves dock, restores in-memory settings and exits |
 | `--verify-dock-glass` | Default off, light/dark on three edges, tray clearance, transparency/blur combinations, disabled surface cleanup | Temporarily changes in-memory settings, restores and exits |
+| `--verify-appbar` | Per-connected-display hosts, every expansion, fixed reservation, interruptible animation, appearance isolation, Start placement, disable/release and idle samples | Restores in-memory preferences and exits; native discovery may require location access |
+| `--verify-borderless` | Disposable WinForms window, floating/maximised/restored styles, exclusion/disable/exit restoration, forced-process-exit guardian and journal recovery | Never modifies personal application windows; closes its disposable process and exits |
+| `--appbar-preview` | Interactive AppBar acceptance | Uses temporary material values, exposes the host for UI automation and suppresses deactivation dismissal; settings changes can persist if settings is opened and closed |
 | `--start-actions-preview` | Interactive Start pin/unpin acceptance | Keeps Start open despite automation activation; real local preference changes persist |
 | `--verify-start` | Prepared Start frame, icons, power bounds, task layout | Leaves preview running |
 | `--verify-backdrop` | Repeated open/hide, no orphan surface, zero blur | Leaves preview running |
 | `--verify-menu-performance` | Idle/menu CPU, zero blur comparison, recent duplication, handle counts over reopen cycles | Temporarily changes blur in memory, restores and exits |
 
 Reports are local under `%LOCALAPPDATA%/NewStart`, not source artifacts. Rendering/desktop tests need an interactive Windows session. CI is a compilation gate; it does not validate native screen reservation or visual behaviour.
+
+The AppBar foundation, theme/material isolation and recovery fixtures passed on one connected 100% display. UI acceptance checked attached media artwork/metadata, real native Wi-Fi state/list, Bluetooth radio state, and a master-volume change restored from 40 to 41 to 40. Playback and network connections were not interrupted. The full remaining hardware/driver/application matrix is tracked in [Adaptive AppBar validation](ADAPTIVE-APPBAR.md); physical multi-monitor/DPI/hot-plug and device connection operations are not asserted as passed.
 
 Start context actions were checked by pinning Microsoft Store to the dock, verifying duplicate pin prevention, unpinning it from New Start, restarting, and pinning it back through search. The test dock pin was removed afterward. Windows Start pin storage was not modified. Start actions use the shared themed context menus and local preferences; All Apps/search remain available after unpinning.
 

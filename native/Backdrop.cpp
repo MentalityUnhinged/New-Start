@@ -14,6 +14,9 @@
 #include <memory>
 #include <vector>
 #include <cmath>
+#include <mmdeviceapi.h>
+#include <endpointvolume.h>
+#include <functiondiscoverykeys_devpkey.h>
 
 using namespace winrt;
 using namespace Windows::Foundation;
@@ -72,7 +75,7 @@ struct Backdrop
         static ATOM atom=[](){WNDCLASSW wc{};wc.lpfnWndProc=[](HWND h,UINT m,WPARAM w,LPARAM l)->LRESULT{
             if(m==WM_NCCREATE){auto create=reinterpret_cast<CREATESTRUCTW*>(l);SetWindowLongPtrW(h,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(create->lpCreateParams));}
             auto state=reinterpret_cast<Backdrop*>(GetWindowLongPtrW(h,GWLP_USERDATA));
-            if(m==WM_TIMER&&state&&(!IsWindow(state->owner)||!IsWindowVisible(state->owner)||IsIconic(state->owner)))ShowWindow(h,SW_HIDE);
+            if(m==WM_TIMER&&state&&(!IsWindow(state->owner)||!IsWindowVisible(state->owner)||IsIconic(state->owner)))state->Hide();
             if(m==WM_NCCALCSIZE)return 0;if(m==WM_NCHITTEST)return HTTRANSPARENT;if(m==WM_MOUSEACTIVATE)return MA_NOACTIVATE;return DefWindowProcW(h,m,w,l);
         };wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"NewStart.CustomBackdrop";return RegisterClassW(&wc);}();
         hwnd=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TRANSPARENT,L"NewStart.CustomBackdrop",L"",WS_POPUP|WS_CAPTION,0,0,1,1,nullptr,nullptr,GetModuleHandleW(nullptr),this);
@@ -87,10 +90,12 @@ struct Backdrop
         sprite=compositor.CreateSpriteVisual();sprite.Brush(brush);rounded=compositor.CreateRoundedRectangleGeometry();sprite.Clip(compositor.CreateGeometricClip(rounded));target.Root(sprite);SetTimer(hwnd,1,100,nullptr);
     }
     ~Backdrop(){if(hwnd){KillTimer(hwnd,1);ShowWindow(hwnd,SW_HIDE);}if(target){target.Root(nullptr);target.Close();target=nullptr;}sprite=nullptr;rounded=nullptr;brush=nullptr;if(hwnd){SetWindowLongPtrW(hwnd,GWLP_USERDATA,0);DestroyWindow(hwnd);}}
+    void Hide() noexcept{ShowWindow(hwnd,SW_HIDE);try{if(target&&target.Root())target.Root(nullptr);}catch(...){}}
     void Update(float radius,bool visible)
     {
         // At zero, remove the entire host backdrop: its built-in smoothing must not remain.
-        if(radius<=0.f||!visible||!IsWindow(owner)||IsIconic(owner)){ShowWindow(hwnd,SW_HIDE);return;}
+        if(radius<=0.f||!visible||!IsWindow(owner)||IsIconic(owner)){Hide();return;}
+        if(!target.Root())target.Root(sprite);
         BOOL enabled=TRUE;check_hresult(DwmSetWindowAttribute(hwnd,DWMWA_USE_HOSTBACKDROPBRUSH,&enabled,sizeof(enabled)));
         int none=1;check_hresult(DwmSetWindowAttribute(hwnd,DWMWA_SYSTEMBACKDROP_TYPE,&none,sizeof(none)));
         RECT placement{};GetWindowRect(owner,&placement);
@@ -112,3 +117,5 @@ extern "C" __declspec(dllexport) HRESULT __stdcall UpdateBackdropRegion(void* st
 extern "C" __declspec(dllexport) HRESULT __stdcall RebindBackdrop(void* state,HWND owner,float radius,BOOL visible) noexcept
 {try{auto backdrop=static_cast<Backdrop*>(state);backdrop->owner=owner;backdrop->Update(radius,visible!=FALSE);return S_OK;}catch(...){return to_hresult();}}
 extern "C" __declspec(dllexport) void __stdcall DestroyBackdrop(void* state) noexcept{delete static_cast<Backdrop*>(state);}
+
+#include "Audio.cpp"

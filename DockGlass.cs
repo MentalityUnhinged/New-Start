@@ -15,6 +15,7 @@ internal sealed class DockGlass:IDisposable
     [DllImport("NewStart.Backdrop.dll",CallingConvention=CallingConvention.StdCall)]static extern void DestroyBackdrop(IntPtr state);
     internal Border Surface {get;}=new(){Visibility=Visibility.Collapsed,HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Top,BorderThickness=new Thickness(1),IsHitTestVisible=false};
     internal Rect Bounds {get;private set;}
+    internal double MaximumCornerRadius {get;set;}=18;
     internal bool NativeVisible=>handle!=IntPtr.Zero&&IsBackdropVisible(handle);
     internal double TintOpacity=>Surface.Background?.Opacity??0;
     IntPtr handle;bool visible;
@@ -30,7 +31,7 @@ internal sealed class DockGlass:IDisposable
         bool dark=Appearance.IsDark(prefs.Theme),high=SystemParameters.HighContrast,effects=NativeBackdrop.TransparencyAllowed();
         var key=(bounds,owner.Left,owner.Top,VisualTreeHelper.GetDpi(owner).DpiScaleX,owner.IsVisible,dark,high,effects,prefs.StartTransparency,prefs.MenuBlur);
         if(previous==key&&(!visible||NativeVisible))return;
-        Bounds=bounds;double corner=Math.Min(18,Math.Min(bounds.Width,bounds.Height)/2);
+        Bounds=bounds;double corner=Math.Min(MaximumCornerRadius,Math.Min(bounds.Width,bounds.Height)/2);
         Surface.Width=bounds.Width;Surface.Height=bounds.Height;Surface.Margin=new Thickness(bounds.Left,bounds.Top,0,0);Surface.CornerRadius=new CornerRadius(corner);Surface.Visibility=Visibility.Visible;
         bool native=effects;
         try

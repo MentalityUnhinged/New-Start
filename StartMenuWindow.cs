@@ -52,9 +52,21 @@ internal sealed class StartMenuWindow : Window
     {
         Reposition();
         UpdateAppearance();Show();Activate();search.Focus();_=StartCatalog.Refresh();
+        if(AppBarPlacement!=null)Dispatcher.BeginInvoke(new Action(Reposition));
     }
+    internal (Native.Rect Anchor,DesktopDisplay Display)? AppBarPlacement {get;set;}
     internal void Reposition()
     {
+        if(AppBarPlacement is {} placement)
+        {
+            var handle=new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            DesktopDisplays.SetWindowPos(handle,IntPtr.Zero,placement.Anchor.Left,placement.Anchor.Bottom,0,0,0x0015);
+            double scale=Math.Max(1,DesktopDisplays.GetDpiForWindow(handle))/96d;
+            var area=DesktopDisplays.Work(placement.Display.Handle);var anchor=placement.Anchor;
+            var menu=DockGeometry.MenuBounds(new Rect(area.Left/scale,area.Top/scale,(area.Right-area.Left)/scale,(area.Bottom-area.Top)/scale),new Rect(anchor.Left/scale,anchor.Top/scale,(anchor.Right-anchor.Left)/scale,(anchor.Bottom-anchor.Top)/scale),DockEdge.Top,DockAlignment.Start);
+            Width=menu.Width;Height=menu.Height;
+            DesktopDisplays.SetWindowPos(handle,IntPtr.Zero,(int)Math.Round(menu.X*scale),(int)Math.Round(menu.Y*scale),(int)Math.Ceiling(menu.Width*scale),(int)Math.Ceiling(menu.Height*scale),0x0014);return;
+        }
         var work=SystemParameters.WorkArea;
         Rect bounds=(DockHost??Owner) is DockWindow dock?DockGeometry.MenuBounds(work,dock.StartAnchor,prefs.Edge,prefs.Alignment,new Rect(dock.Left,dock.Top,dock.ActualWidth,dock.ActualHeight)):new Rect(work.Left+(work.Width-Math.Min(640,work.Width-24))/2,work.Top+12,Math.Min(640,work.Width-24),Math.Min(660,work.Height-24));
         Width=bounds.Width;Height=bounds.Height;Left=bounds.Left;Top=bounds.Top;

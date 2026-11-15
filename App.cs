@@ -8,8 +8,12 @@ public static class Program
 {
     [STAThread] public static void Main(string[] args)
     {
+        if(args.Length==1&&args[0]=="--borderless-fixture"){BorderlessFixture.Run();return;}
+        if(args.Length==2&&args[0]=="--borderless-crash-test"&&long.TryParse(args[1],out long fixture)){BorderlessFixture.CrashTest(new IntPtr(fixture));return;}
+        if(args.Length==3&&args[0]=="--borderless-guardian"&&int.TryParse(args[1],out int parent)&&long.TryParse(args[2],out long started)){BorderlessManager.Guard(parent,started);return;}
         using var single = new Mutex(true, "NewStart.User." + Environment.UserName, out bool first);
         if (!first) return;
+        BorderlessManager.Recover();
         if(Array.IndexOf(args,"--verify-pin-model")>=0){PinDragValidation.Run();return;}
         if(Array.IndexOf(args,"--verify-audit")>=0){var validationApp=new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};AuditValidation.Run();return;}
         try{Preferences.MigrateLegacy();}catch(System.IO.IOException){}catch(UnauthorizedAccessException){}
@@ -34,8 +38,11 @@ public static class Program
         {
             var dock=new DockWindow{Title="New Start (Beta)"};
             if(Array.IndexOf(args,"--dock-preview")>=0)dock.ShowInTaskbar=true;
+            if(Array.IndexOf(args,"--verify-appbar")>=0)dock.Loaded+=(_,_)=>dock.Dispatcher.BeginInvoke(new Action(async()=>await dock.VerifyAppBar()));
+            if(Array.IndexOf(args,"--verify-borderless")>=0)dock.Loaded+=(_,_)=>dock.Dispatcher.BeginInvoke(new Action(async()=>await dock.VerifyBorderless()));
+            if(Array.IndexOf(args,"--appbar-preview")>=0)dock.Loaded+=(_,_)=>dock.Dispatcher.BeginInvoke(new Action(dock.PreviewAppBar));
             if(Array.IndexOf(args,"--verify-reservation")>=0)dock.Loaded+=(_,_)=>dock.Dispatcher.BeginInvoke(new Action(async()=>await dock.VerifyReservation()));
-            if(Array.IndexOf(args,"--verify-backdrop")>=0)dock.Loaded+=(_,_)=>dock.Dispatcher.BeginInvoke(new Action(async()=>await dock.VerifyBackdropDismissal()));
+            if(Array.IndexOf(args,"--verify-backdrop")>=0)dock.Loaded+=(_,_)=>dock.Dispatcher.BeginInvoke(new Action(async()=>{await dock.VerifyBackdropDismissal();if(Array.IndexOf(args,"--exit-after-verification")>=0)dock.Close();}));
             if(Array.IndexOf(args,"--settings-preview")>=0){dock.ShowInTaskbar=true;dock.Loaded+=(_,_)=>dock.Dispatcher.BeginInvoke(new Action(dock.Settings));}
             if(Array.IndexOf(args,"--start-actions-preview")>=0)dock.Loaded+=(_,_)=>dock.Dispatcher.BeginInvoke(new Action(dock.PreviewStartActions));
             if(Array.IndexOf(args,"--verify-start")>=0)dock.Loaded+=(_,_)=>dock.Dispatcher.BeginInvoke(new Action(async()=>await dock.VerifyStart()));

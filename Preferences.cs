@@ -14,6 +14,20 @@ public sealed class Preferences
     public double StartTransparency { get; set; } = .8;
     public double MenuBlur { get; set; } = 16;
     public bool DockBackground {get;set;}=false;
+    public bool AppBarEnabled {get;set;}
+    public double? AppBarTransparency {get;set;}
+    public double? AppBarBlur {get;set;}
+    public bool AppBarAllMonitors {get;set;}=true;
+    public bool AppBarMediaHover {get;set;}=true;
+    public bool AppBarAnimations {get;set;}=true;
+    public int AppBarAnimationMilliseconds {get;set;}=180;
+    public bool AppBarClock {get;set;}=true;
+    public bool AppBarDate {get;set;}
+    public int AppBarClockFormat {get;set;} // System, 12-hour, 24-hour
+    public bool BorderlessWindows {get;set;}
+    public List<string> BorderlessExclusions {get;set;}=new();
+    public DockEdge AppBarPreviousEdge {get;set;}=DockEdge.Bottom;
+    public DockAlignment AppBarPreviousAlignment {get;set;}=DockAlignment.Centre;
     public bool ShowSystemControls { get; set; } = false;
     public bool ShowTaskView { get; set; } = true;
     public bool ShowDesktop { get; set; } = true;
@@ -58,6 +72,12 @@ public sealed class Preferences
         static List<string> Paths(List<string>? values)=>(values??new()).Where(value=>!string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         Magnification=Number(Magnification,1,1.75,1.25,2);IconSize=Number(IconSize,16,64,36);
         Theme=Math.Clamp(Theme,0,2);Clock=Math.Clamp(Clock,0,2);
+        AppBarAnimationMilliseconds=Math.Clamp(AppBarAnimationMilliseconds,0,600);AppBarClockFormat=Math.Clamp(AppBarClockFormat,0,2);
+        if(AppBarTransparency.HasValue)AppBarTransparency=Number(AppBarTransparency.Value,0,1,StartTransparency,2);
+        if(AppBarBlur.HasValue)AppBarBlur=Number(AppBarBlur.Value,0,60,MenuBlur,2);
+        BorderlessExclusions=Paths(BorderlessExclusions);
+        if(!Enum.IsDefined(AppBarPreviousEdge))AppBarPreviousEdge=DockEdge.Bottom;
+        if(!Enum.IsDefined(AppBarPreviousAlignment))AppBarPreviousAlignment=DockAlignment.Centre;
         if(!Enum.IsDefined(Edge))Edge=DockEdge.Bottom;
         if(!Enum.IsDefined(Alignment))Alignment=DockAlignment.Centre;
         StartTransparency=Number(StartTransparency,0,1,.8,2);MenuBlur=Number(MenuBlur,0,60,16,2);

@@ -1,0 +1,318 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Shapes;
+using System.Windows.Threading;
+using Microsoft.Win32;
+
+namespace NewStart;
+internal enum AppBarSection { None,Media,Audio,Network,Bluetooth,Clock,Application }
+internal sealed class AdaptiveAppBars:IDisposable
+{
+    readonly DockWindow dock;internal readonly Preferences Preferences;
+    readonly Dictionary<string,AdaptiveAppBarWindow> bars=new();bool disposed,queued;
+    internal readonly ActiveApplication Applications;
+    internal readonly BorderlessManager Borderless;
+    internal readonly AppBarAudio Audio;
+    internal readonly AppBarMedia Media;
+    internal readonly AppBarNetwork Network;
+    internal readonly AppBarBluetooth Bluetooth;
+    internal IEnumerable<AdaptiveAppBarWindow> Windows=>bars.Values;
+    internal AdaptiveAppBars(DockWindow host,Preferences prefs)
+    {
+        dock=host;Preferences=prefs;Applications=new(host.Dispatcher);Borderless=new(prefs,Applications);Audio=new(host.Dispatcher);Media=new(host.Dispatcher);Network=new(host.Dispatcher);Bluetooth=new(host.Dispatcher);
+        SystemEvents.DisplaySettingsChanged+=DisplaysChanged;SystemEvents.UserPreferenceChanged+=UserPreferenceChanged;
+        try{Reconcile();Borderless.Update();}catch{Dispose();throw;}
+    }
+    void DisplaysChanged(object? sender,EventArgs args)=>QueueDisplays();
+    void UserPreferenceChanged(object sender,UserPreferenceChangedEventArgs args)=>QueueDisplays();
+    internal void QueueDisplays()
+    {
+        if(disposed||queued)return;queued=true;dock.Dispatcher.BeginInvoke(new Action(()=>{queued=false;if(!disposed)Reconcile();}));
+    }
+    void Reconcile()
+    {
+        var displays=DesktopDisplays.All().Where(display=>Preferences.AppBarAllMonitors||display.Primary).ToArray();
+        foreach(string name in bars.Keys.Except(displays.Select(display=>display.Name)).ToArray()){bars[name].Close();bars.Remove(name);}
+        foreach(var display in displays)
+        {
+            if(!bars.TryGetValue(display.Name,out var bar)){bar=new(this,display);bars.Add(display.Name,bar);bar.Show();}
+            else bar.Display=display;
+            bar.Reposition();bar.UpdateAppearance();
+        }
+        dock.AppBarDisplaysChanged();
+    }
+    internal void Refresh(bool displays=false){if(disposed)return;if(displays)Reconcile();Borderless.Update();foreach(var bar in bars.Values)bar.RefreshContent();}
+    internal void CollapseOthers(AdaptiveAppBarWindow selected){foreach(var bar in bars.Values)if(bar!=selected)bar.Collapse();}
+    internal void OpenStart(AdaptiveAppBarWindow bar,FrameworkElement button)
+    {
+        CollapseOthers(bar);bar.Collapse();var point=button.PointToScreen(new Point());
+        var dpi=VisualTreeHelper.GetDpi(bar);var anchor=new Native.Rect{Left=(int)point.X,Top=(int)point.Y,Right=(int)(point.X+button.ActualWidth*dpi.DpiScaleX),Bottom=(int)(point.Y+button.ActualHeight*dpi.DpiScaleY)};
+        dock.ToggleStartFromAppBar(anchor,bar.Display);
+    }
+    internal void Settings()=>dock.Settings();
+    public void Dispose()
+    {
+        if(disposed)return;disposed=true;SystemEvents.DisplaySettingsChanged-=DisplaysChanged;SystemEvents.UserPreferenceChanged-=UserPreferenceChanged;
+        foreach(var bar in bars.Values.ToArray())bar.Close();bars.Clear();Borderless.Dispose();Applications.Dispose();Audio.Dispose();Media.Dispose();Network.Dispose();Bluetooth.Dispose();
+    }
+}
+
+internal sealed class AdaptiveAppBarWindow:Window
+{
+    internal const double RestHeight=36;
+    readonly AdaptiveAppBars host;Preferences Prefs=>host.Preferences;
+    internal DesktopDisplay Display;
+    readonly Grid root=new(),header=new();readonly StackPanel body=new(){Margin=new Thickness(16,12,16,14)};
+    readonly ScrollViewer bodyScroll=new(){VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
+    readonly Border bodyHit=new(){Background=Brushes.Transparent,HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Top,ClipToBounds=true};
+    readonly DockGlass restingGlass=new(){MaximumCornerRadius=0},expandedGlass=new(){MaximumCornerRadius=12};
+    readonly Preferences surfacePrefs=new(){DockBackground=true};
+    readonly TextBlock application=new(){Text="Desktop",MaxWidth=260,TextTrimming=TextTrimming.CharacterEllipsis};
+    readonly Image applicationIcon=new(){Width=16,Height=16,Margin=new Thickness(0,0,7,0)};
+    readonly DispatcherTimer clockTimer=new(){Interval=TimeSpan.FromSeconds(1)};
+    readonly DispatcherTimer leaveTimer=new(){Interval=TimeSpan.FromMilliseconds(450)};
+    readonly DispatcherTimer hoverTimer=new(){Interval=TimeSpan.FromMilliseconds(300)};
+    readonly Dictionary<AppBarSection,Button> buttons=new();
+    readonly StackPanel windowControls=new(){Orientation=Orientation.Horizontal};
+    Button clock=null!,media=null!,audio=null!,network=null!,bluetooth=null!;
+    DockReservation? reservation;HwndSource? source;AppBarSection current;double expandedWidth=420,expandedLeft;bool closing,repositioning;int appIconVersion;
+    bool? dark;bool highContrast;
+    int animationGeneration;
+    Slider? volumeSlider;Button? muteButton;TextBlock? audioStatus;bool syncingVolume;
+    TextBlock? networkStatus;
+    internal AppBarSection Section=>current;
+    internal bool Testing {get;set;}
+    internal double ReservedHeight=>RestHeight;
+    internal long SurfaceUpdates {get;private set;}
+    internal long Repositions {get;private set;}
+    internal bool BlurVisible=>restingGlass.NativeVisible;
+    internal double MaterialOpacity=>restingGlass.TintOpacity;
+    internal bool ClockIsCentered=>!Prefs.AppBarClock||Math.Abs(clock.TranslatePoint(new Point(clock.ActualWidth/2,0),this).X-ActualWidth/2)<1;
+    internal DockReservation.Rect ReservedBounds=>reservation?.Bounds??default;
+    internal AdaptiveAppBarWindow(AdaptiveAppBars owner,DesktopDisplay display)
+    {
+        host=owner;Display=display;Title="New Start Adaptive AppBar (Beta)";WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;AllowsTransparency=true;Background=Brushes.Transparent;Topmost=true;ShowInTaskbar=false;ShowActivated=false;Height=RestHeight;Width=600;
+        Content=root;root.Children.Add(restingGlass.Surface);root.Children.Add(expandedGlass.Surface);root.Children.Add(bodyHit);root.Children.Add(header);
+        header.Height=RestHeight;header.VerticalAlignment=VerticalAlignment.Top;header.Background=new SolidColorBrush(Color.FromArgb(1,0,0,0));header.Margin=new Thickness(8,0,8,0);
+        header.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});header.ColumnDefinitions.Add(new ColumnDefinition());header.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
+        var left=new StackPanel{Orientation=Orientation.Horizontal};header.Children.Add(left);
+        var start=Compact(new Ellipse{Width=16,Height=16,StrokeThickness=1.5},"Start",()=>host.OpenStart(this,(FrameworkElement)left.Children[0]));
+        ((Ellipse)start.Content).SetBinding(Shape.StrokeProperty,new System.Windows.Data.Binding("Foreground"){Source=start});left.Children.Add(start);
+        var titlePanel=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};titlePanel.Children.Add(applicationIcon);titlePanel.Children.Add(application);
+        var appButton=Compact(titlePanel,"Active application",()=>Toggle(AppBarSection.Application));left.Children.Add(appButton);buttons[AppBarSection.Application]=appButton;
+        var right=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right};Grid.SetColumn(right,2);header.Children.Add(right);
+        media=SectionButton(right,AppBarSection.Media,"\uE8D6","Media");
+        media.MouseEnter+=(_,_)=>{if(Prefs.AppBarMediaHover&&current==AppBarSection.None)hoverTimer.Start();};media.MouseLeave+=(_,_)=>hoverTimer.Stop();
+        audio=SectionButton(right,AppBarSection.Audio,"\uE767","Volume");network=SectionButton(right,AppBarSection.Network,"\uE701","Wi-Fi");bluetooth=SectionButton(right,AppBarSection.Bluetooth,"\uE702","Bluetooth");
+        clock=Compact("", "Clock",()=>Toggle(AppBarSection.Clock));clock.HorizontalAlignment=HorizontalAlignment.Center;Grid.SetColumnSpan(clock,3);header.Children.Add(clock);buttons[AppBarSection.Clock]=clock;
+        right.Children.Add(Compact("\uE713","New Start settings",host.Settings,true));right.Children.Add(windowControls);
+        bodyHit.Background=new SolidColorBrush(Color.FromArgb(1,0,0,0));bodyScroll.Content=body;bodyHit.Child=bodyScroll;bodyHit.Visibility=Visibility.Collapsed;
+        MouseLeave+=(_,_)=>{if(current!=AppBarSection.None)leaveTimer.Start();};MouseEnter+=(_,_)=>leaveTimer.Stop();
+        bodyHit.MouseLeave+=(_,_)=>{if(current!=AppBarSection.None)leaveTimer.Start();};bodyHit.MouseEnter+=(_,_)=>leaveTimer.Stop();
+        leaveTimer.Tick+=(_,_)=>{leaveTimer.Stop();if(body.IsKeyboardFocusWithin&&Keyboard.FocusedElement is PasswordBox or System.Windows.Controls.Primitives.TextBoxBase)return;if(!IsMouseOver){if(Mouse.LeftButton==MouseButtonState.Pressed)leaveTimer.Start();else Collapse();}};
+        hoverTimer.Tick+=(_,_)=>{hoverTimer.Stop();if(media.IsMouseOver&&current==AppBarSection.None)Expand(AppBarSection.Media);};
+        PreviewKeyDown+=(_,e)=>{if(e.Key==Key.Escape){Collapse();e.Handled=true;}};
+        Deactivated+=(_,_)=>{if(!Testing&&current!=AppBarSection.None)Collapse();};
+        host.Applications.Changed+=ApplicationChanged;host.Audio.Changed+=AudioChanged;host.Media.Changed+=MediaChanged;host.Network.Changed+=NetworkChanged;host.Bluetooth.Changed+=BluetoothChanged;
+        Loaded+=(_,_)=>{
+            source=HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);source?.AddHook(Hook);
+            reservation=new DockReservation(this,()=>Display.Handle);reservation.Changed+=Reposition;Reposition();RefreshContent();clockTimer.Start();
+        };
+        SizeChanged+=(_,_)=>UpdateSurface();clockTimer.Tick+=(_,_)=>UpdateClock();
+        Closed+=(_,_)=>{
+            closing=true;clockTimer.Stop();leaveTimer.Stop();hoverTimer.Stop();source?.RemoveHook(Hook);reservation?.Dispose();restingGlass.Dispose();expandedGlass.Dispose();
+            host.Applications.Changed-=ApplicationChanged;host.Audio.Changed-=AudioChanged;host.Media.Changed-=MediaChanged;host.Network.Changed-=NetworkChanged;host.Bluetooth.Changed-=BluetoothChanged;
+        };
+    }
+    IntPtr Hook(IntPtr hwnd,int message,IntPtr wParam,IntPtr lParam,ref bool handled)
+    {
+        if(message==0x007E||message==0x02E0){Collapse(false);host.QueueDisplays();}
+        return IntPtr.Zero;
+    }
+    Button Compact(object content,string name,Action action,bool glyph=false)
+    {
+        var button=new Button{Content=glyph?new TextBlock{Text=content.ToString(),FontFamily=new FontFamily("Segoe Fluent Icons"),FontSize=15}:content,Height=RestHeight,MinWidth=34,Padding=new Thickness(8,0,8,0),ToolTip=name,VerticalAlignment=VerticalAlignment.Top};
+        StartMenuWindow.Borderless(button);System.Windows.Automation.AutomationProperties.SetName(button,name);button.Click+=(_,_)=>action();return button;
+    }
+    Button SectionButton(Panel parent,AppBarSection section,string glyph,string name)
+    {var button=Compact(glyph,name,()=>Toggle(section),true);buttons[section]=button;parent.Children.Add(button);return button;}
+    internal void Reposition()
+    {
+        Repositions++;
+        if(closing||repositioning||!IsLoaded)return;repositioning=true;
+        try
+        {
+            var hwnd=new WindowInteropHelper(this).Handle;
+            // Move to the display before measuring its actual per-window DPI.
+            DesktopDisplays.SetWindowPos(hwnd,IntPtr.Zero,Display.Bounds.Left,Display.Bounds.Top,0,0,0x0015);
+            double scale=Math.Max(1,DesktopDisplays.GetDpiForWindow(hwnd))/96d;
+            reservation?.Update(true,RestHeight,DockEdge.Top);var bounds=reservation?.Bounds??default;
+            if(bounds.Right<=bounds.Left){bounds=new(){Left=Display.Bounds.Left,Top=Display.Bounds.Top,Right=Display.Bounds.Right,Bottom=Display.Bounds.Top+(int)Math.Ceiling(RestHeight*scale)};}
+            Width=(bounds.Right-bounds.Left)/scale;
+            DesktopDisplays.SetWindowPos(hwnd,IntPtr.Zero,bounds.Left,bounds.Top,bounds.Right-bounds.Left,(int)Math.Ceiling(Height*scale),0x0014);
+            expandedWidth=Math.Min(440,Math.Max(100,Width-16));expandedLeft=Math.Clamp(expandedLeft,8,Math.Max(8,Width-expandedWidth-8));UpdateSurface();
+        }
+        finally{repositioning=false;}
+    }
+    internal void UpdateAppearance()
+    {
+        if(closing)return;bool next=Appearance.IsDark(Prefs.Theme);
+        if(dark!=next||highContrast!=SystemParameters.HighContrast){dark=next;highContrast=SystemParameters.HighContrast;Appearance.Apply(this,next);Background=Brushes.Transparent;}
+        surfacePrefs.Theme=Prefs.Theme;surfacePrefs.MenuBlur=Prefs.AppBarBlur??Prefs.MenuBlur;surfacePrefs.StartTransparency=Prefs.AppBarTransparency??Prefs.StartTransparency;
+        UpdateSurface();
+    }
+    void UpdateSurface()
+    {
+        SurfaceUpdates++;
+        if(!IsLoaded||closing)return;
+        application.MaxWidth=Math.Clamp(ActualWidth-540,0,260);
+        windowControls.Visibility=ActualWidth<720?Visibility.Collapsed:Visibility.Visible;
+        media.Visibility=ActualWidth<500?Visibility.Collapsed:Visibility.Visible;
+        restingGlass.Update(this,surfacePrefs,new Rect(0,0,Math.Max(1,ActualWidth),RestHeight));
+        if(Testing)
+        {
+            var hwnd=new WindowInteropHelper(this).Handle;DesktopDisplays.GetWindowRect(hwnd,out var native);
+            var details=new{Handle=hwnd.ToInt64(),ActualWidth,ActualHeight,Height,HeaderHeight=header.ActualHeight,HeaderOrigin=header.PointToScreen(new Point()),HeaderVisible=header.IsVisible,Opacity,WindowState,Native=new{native.Left,native.Top,native.Right,native.Bottom},Section=current.ToString(),Buttons=buttons.Select(pair=>new{Section=pair.Key.ToString(),Origin=pair.Value.PointToScreen(new Point()),pair.Value.ActualWidth,pair.Value.ActualHeight})};
+            System.IO.File.WriteAllText(System.IO.Path.Combine(Preferences.Folder,"appbar-preview-layout.json"),System.Text.Json.JsonSerializer.Serialize(details));
+        }
+        double extra=Math.Max(0,ActualHeight-RestHeight);
+        if(extra<1){expandedGlass.Update(this,surfacePrefs,Rect.Empty);bodyHit.Visibility=Visibility.Collapsed;return;}
+        expandedGlass.Update(this,surfacePrefs,new Rect(expandedLeft,RestHeight-8,expandedWidth,extra+8));
+        bodyHit.Visibility=Visibility.Visible;bodyHit.Width=expandedWidth;bodyHit.Height=extra;bodyHit.Margin=new Thickness(expandedLeft,RestHeight,0,0);
+    }
+    void AnimateHeight(double height,bool animate=true)
+    {
+        int version=++animationGeneration;
+        double from=ActualHeight;BeginAnimation(HeightProperty,null);Height=height;
+        if(animate&&Prefs.AppBarAnimations&&SystemParameters.ClientAreaAnimation&&Prefs.AppBarAnimationMilliseconds>0)
+        {
+            var animation=new DoubleAnimation(from,height,TimeSpan.FromMilliseconds(Prefs.AppBarAnimationMilliseconds)){EasingFunction=new CubicEase{EasingMode=EasingMode.EaseOut},FillBehavior=FillBehavior.Stop};
+            animation.Completed+=(_,_)=>{if(closing||version!=animationGeneration)return;BeginAnimation(HeightProperty,null);Height=height;UpdateSurface();};
+            BeginAnimation(HeightProperty,animation,HandoffBehavior.SnapshotAndReplace);
+        }
+    }
+    internal void Toggle(AppBarSection section){if(current==section)Collapse();else Expand(section);}
+    internal void Expand(AppBarSection section)
+    {
+        host.CollapseOthers(this);hoverTimer.Stop();leaveTimer.Stop();current=section;
+        expandedWidth=Math.Min(440,Math.Max(100,ActualWidth-16));
+        if(buttons.TryGetValue(section,out var button)){var point=button.TranslatePoint(new Point(button.ActualWidth/2,0),this);expandedLeft=Math.Clamp(point.X-expandedWidth/2,8,Math.Max(8,ActualWidth-expandedWidth-8));}
+        BuildBody();FitExpansion();UpdateSurface();
+        if(section==AppBarSection.Network)_=host.Network.Refresh(true);
+    }
+    void FitExpansion()
+    {
+        if(current==AppBarSection.None)return;
+        double limit=current switch{AppBarSection.Media=>220,AppBarSection.Audio=>300,AppBarSection.Application=>180,_=>300};
+        body.Measure(new Size(expandedWidth,double.PositiveInfinity));double target=Math.Clamp(body.DesiredSize.Height,44,limit);
+        double scale=VisualTreeHelper.GetDpi(this).DpiScaleY;double maximum=(Display.Bounds.Bottom-Display.Bounds.Top)/scale-RestHeight-24;
+        double height=RestHeight+Math.Max(40,Math.Min(target,maximum));if(Math.Abs(Height-height)>.5)AnimateHeight(height);
+    }
+    internal void Collapse(bool animate=true){if(current==AppBarSection.None&&Height==RestHeight)return;current=AppBarSection.None;hoverTimer.Stop();leaveTimer.Stop();AnimateHeight(RestHeight,animate);}
+    void Text(string value,double size=13){body.Children.Add(new TextBlock{Text=value,FontSize=size,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,8)});}
+    Button Action(string label,Action action,Panel? parent=null,bool enabled=true){var button=new Button{Content=label,IsEnabled=enabled,Margin=new Thickness(0,0,6,6),Padding=new Thickness(10,6,10,6)};button.Click+=(_,_)=>action();(parent??body).Children.Add(button);return button;}
+    internal static void Open(string uri){try{Process.Start(new ProcessStartInfo(uri){UseShellExecute=true});}catch(Exception e){MessageBox.Show(e.Message,"New Start");}}
+    void BuildBody()
+    {
+        body.Children.Clear();volumeSlider=null;muteButton=null;audioStatus=null;networkStatus=null;
+        switch(current)
+        {
+            case AppBarSection.Media:
+                var media=host.Media;
+                var row=new StackPanel{Orientation=Orientation.Horizontal};body.Children.Add(row);
+                if(media.Artwork!=null)row.Children.Add(new Image{Source=media.Artwork,Width=56,Height=56,Margin=new Thickness(0,0,12,8)});
+                else row.Children.Add(new TextBlock{Text="\uE8D6",FontFamily=new FontFamily("Segoe Fluent Icons"),FontSize=32,Width=56,Margin=new Thickness(0,0,12,8)});
+                row.Children.Add(new TextBlock{Text=media.Title+"\n"+media.Artist,TextWrapping=TextWrapping.Wrap,MaxWidth=Math.Max(80,expandedWidth-120),VerticalAlignment=VerticalAlignment.Center});
+                var transport=new StackPanel{Orientation=Orientation.Horizontal};body.Children.Add(transport);var controls=media.Playback?.Controls;
+                Action("Previous",()=>_=media.Command("previous"),transport,controls?.IsPreviousEnabled==true);
+                Action(media.Playback?.PlaybackStatus==Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing?"Pause":"Play",()=>_=media.Command("toggle"),transport,controls?.IsPlayPauseToggleEnabled==true);
+                Action("Next",()=>_=media.Command("next"),transport,controls?.IsNextEnabled==true);
+                if(media.Sessions.Count>1)foreach(var session in media.Sessions){var source=session;string name=StartCatalog.Current?.Apps.FirstOrDefault(app=>app.Target=="shell:AppsFolder\\"+source.SourceAppUserModelId)?.Name??source.SourceAppUserModelId;Action((source==media.Selected?"✓  ":"")+name,()=>media.Select(source));}
+                if(media.Error!=null)Text(media.Error,12);break;
+            case AppBarSection.Audio:
+                var audio=host.Audio;Text(audio.Output,14);if(audio.Error!=null)Text(audio.Error,12);
+                var volume=new Slider{Minimum=0,Maximum=100,Value=audio.Level,TickFrequency=1,IsSnapToTickEnabled=true,Margin=new Thickness(0,4,0,8),ToolTip="Master volume"};System.Windows.Automation.AutomationProperties.SetName(volume,"Master volume");volumeSlider=volume;
+                volume.ValueChanged+=(_,_)=>{if(!syncingVolume)audio.Set(Math.Round(volume.Value),audio.Muted);};body.Children.Add(volume);
+                muteButton=Action(audio.Muted?"Unmute":"Mute",()=>audio.Set(audio.Level,!audio.Muted),enabled:audio.Error==null);
+                foreach(var output in audio.Outputs){var device=output;Action((output.Name==audio.Output?"✓  ":"")+output.Name,()=>audio.SelectOutput(device));}
+                audioStatus=new TextBlock{Text=audio.Error??"Choose an audio output.",TextWrapping=TextWrapping.Wrap,FontSize=12};body.Children.Add(audioStatus);
+                Action("More sound options",()=>Open("ms-settings:sound"));break;
+            case AppBarSection.Network:
+                networkStatus=new TextBlock{Text=host.Network.Status,FontSize=14,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,8)};body.Children.Add(networkStatus);var networkActions=new StackPanel{Orientation=Orientation.Horizontal};body.Children.Add(networkActions);
+                Action("Refresh",()=>_=host.Network.Refresh(true),networkActions);Action(host.Network.AccessDenied?"Location permission":"Network configuration",()=>Open(host.Network.AccessDenied?"ms-settings:privacy-location":"ms-settings:network-wifi"),networkActions);
+                foreach(var item in host.Network.Networks)
+                {
+                    var network=item;var line=new StackPanel{Margin=new Thickness(0,4,0,5)};body.Children.Add(line);
+                    line.Children.Add(new TextBlock{Text=network.Name+" · "+network.Quality+"%"+(network.Connected?" · Connected":""),TextTrimming=TextTrimming.CharacterEllipsis});
+                    if(network.Connected)Action("Disconnect",()=>_=host.Network.Connect(network,true),line);
+                    else if(network.Profile.Length>0)Action("Connect",()=>_=host.Network.Connect(network,false),line,network.Connectable);
+                    else if(!network.Secured||network.Authentication==7)Action("Connect…",()=>{
+                        var password=new PasswordBox{Margin=new Thickness(0,3,0,6),MaxLength=63};
+                        System.Windows.Automation.AutomationProperties.SetName(password,"Wi-Fi password for "+network.Name);
+                        if(network.Secured){line.Children.Add(new TextBlock{Text="Network password"});line.Children.Add(password);password.Focus();}
+                        Action("Save profile and connect",()=>{string secret=password.Password;password.Clear();_=host.Network.Provision(network,secret);},line);
+                        FitExpansion();
+                    },line);
+                    else Action("Configure enterprise/WPA3 network",()=>Open("ms-settings:network-wifi"),line);
+                }break;
+            case AppBarSection.Bluetooth:
+                Text(host.Bluetooth.Status,14);Action(host.Bluetooth.Enabled?"Turn Bluetooth off":"Turn Bluetooth on",()=>_=host.Bluetooth.Toggle(),enabled:host.Bluetooth.CanToggle);
+                if(host.Bluetooth.Devices.Count==0)Text("No paired devices reported by Windows.",12);
+                foreach(var device in host.Bluetooth.Devices)Text(device.Name+" · "+(device.Connected is true?"Connected":device.Connected is false?"Not connected":"Paired; connection state unavailable"),12);
+                Text("Connections depend on the device's Bluetooth profile. Windows manages devices without a supported connection adapter.",12);Action("Device connection options",()=>Open("ms-settings:bluetooth"));break;
+            case AppBarSection.Clock:
+                Text(DateTime.Now.ToString("D",CultureInfo.CurrentCulture),14);var calendar=new System.Windows.Controls.Calendar{SelectedDate=DateTime.Today,DisplayDate=DateTime.Today};body.Children.Add(calendar);break;
+            case AppBarSection.Application:
+                var app=host.Applications.Current;Text(app?.Title??"Desktop",14);Text(host.Borderless.Feedback,12);
+                if(app!=null)Action("Exclude this app from borderless management",()=>{if(!Prefs.BorderlessExclusions.Contains(app.Path,StringComparer.OrdinalIgnoreCase))Prefs.BorderlessExclusions.Add(app.Path);Prefs.Save();host.Borderless.Update();BuildBody();});break;
+        }
+        if(IsLoaded)FitExpansion();
+    }
+    void AudioChanged()
+    {
+        audio.ToolTip=host.Audio.Muted?"Muted":$"Volume {host.Audio.Level:0}% · {host.Audio.Output}";
+        if(current!=AppBarSection.Audio)return;
+        if(volumeSlider!=null&&!volumeSlider.IsMouseCaptureWithin){syncingVolume=true;volumeSlider.Value=host.Audio.Level;syncingVolume=false;}
+        if(muteButton!=null)muteButton.Content=host.Audio.Muted?"Unmute":"Mute";
+        if(audioStatus!=null)audioStatus.Text=host.Audio.Error??host.Audio.Output;
+        if(!body.IsMouseOver&&!body.IsKeyboardFocusWithin)BuildBody();
+    }
+    void MediaChanged(){media.ToolTip=host.Media.Title;if(current==AppBarSection.Media)BuildBody();}
+    void NetworkChanged(){network.ToolTip=host.Network.Status;if(networkStatus!=null)networkStatus.Text=host.Network.Status;if(current==AppBarSection.Network&&!body.IsKeyboardFocusWithin)BuildBody();}
+    void BluetoothChanged(){bluetooth.ToolTip=host.Bluetooth.Status;bluetooth.Opacity=host.Bluetooth.Enabled?1:.55;if(current==AppBarSection.Bluetooth)BuildBody();}
+    async void ApplicationChanged()
+    {
+        var target=host.Applications.Current;application.Text=target==null?"Desktop":System.IO.Path.GetFileNameWithoutExtension(target.Path);application.ToolTip=target?.Title;windowControls.Children.Clear();
+        bool sameMonitor=target!=null&&DesktopDisplays.MonitorFromWindow(target.Handle,2)==Display.Handle;
+        if(sameMonitor&&target is {Fullscreen:false})
+        {
+            var saved=target;
+            void Command(int command){if(host.Applications.ValidTarget(saved))Native.ShowWindowAsync(saved.Handle,command);}
+            if((saved.Style&0x20000)!=0)windowControls.Children.Add(Compact("\uE921","Minimise active window",()=>Command(6),true));
+            if((saved.Style&0x10000)!=0)windowControls.Children.Add(Compact(saved.Maximized?"\uE923":"\uE922",saved.Maximized?"Restore active window":"Maximise active window",()=>Command(saved.Maximized?9:3),true));
+            if((saved.Style&0x80000)!=0)windowControls.Children.Add(Compact("\uE8BB","Close active window",()=>{if(host.Applications.ValidTarget(saved))Native.CloseWindow(saved.Handle);},true));
+        }
+        int version=++appIconVersion;applicationIcon.Source=null;
+        if(target!=null){var icon=await StartCatalog.Icon(target.Path);if(!closing&&version==appIconVersion)applicationIcon.Source=icon;}
+        if(current==AppBarSection.Application)BuildBody();
+        if(target?.Fullscreen==true&&sameMonitor){Collapse(false);Topmost=false;}else Topmost=true;
+        if(current!=AppBarSection.None&&Native.GetForegroundWindow()==target?.Handle)Collapse();
+    }
+    void UpdateClock()
+    {
+        string format=Prefs.AppBarClockFormat switch{1=>"h:mm tt",2=>"HH:mm",_=>CultureInfo.CurrentCulture.DateTimeFormat.ShortTimePattern};
+        string text=DateTime.Now.ToString(format,CultureInfo.CurrentCulture)+(Prefs.AppBarDate?"  "+DateTime.Now.ToString("d",CultureInfo.CurrentCulture):"");
+        if(clock.Content?.ToString()!=text)clock.Content=text;clock.Visibility=Prefs.AppBarClock?Visibility.Visible:Visibility.Collapsed;
+    }
+    internal void RefreshContent(){UpdateAppearance();UpdateClock();ApplicationChanged();AudioChanged();MediaChanged();NetworkChanged();BluetoothChanged();}
+}
