@@ -26,6 +26,8 @@ public sealed partial class DockWindow : Window
     List<Native.TaskWindow> windows=new(); string signature="";
     StartMenuWindow? startMenu;
     AdaptiveAppBars? appBars;
+    string settingsCategory="Dock";
+    bool suppressSettingsPersistence;
     DockReservation? reservation;
     RecycleBinWatcher? recycleWatcher;
     MenuItem? emptyRecycleItem;
@@ -556,7 +558,7 @@ public sealed partial class DockWindow : Window
         e.Handled=true;if(!dragging)Refresh(true);
     }
     double PinAxis(Button button,bool vertical){var point=button.TranslatePoint(new Point(button.ActualWidth/2,button.ActualHeight/2),this);return vertical?point.Y:point.X;}
-    void Save(){try{prefs.Save();}catch(Exception e){MessageBox.Show("Could not save settings: "+e.Message);}}
+    void Save(){if(suppressSettingsPersistence)return;try{prefs.Save();}catch(Exception e){MessageBox.Show("Could not save settings: "+e.Message);}}
     static void Add(ContextMenu menu,string title,Action action){var item=new MenuItem{Header=title};item.Click+=(_,_)=>action();menu.Items.Add(item);}
     static bool Launch(string target){try{Process.Start(new ProcessStartInfo(target){UseShellExecute=true});return true;}catch(Exception e){MessageBox.Show(e.Message,"Could not open");return false;}}
     static void Activate(Native.TaskWindow w){if(Native.GetForegroundWindow()==w.Handle){Native.ShowWindowAsync(w.Handle,6);return;}if(Native.IsIconic(w.Handle))Native.ShowWindowAsync(w.Handle,9);if(!Native.SetForegroundWindow(w.Handle))MessageBox.Show("Windows declined window activation. Use Alt+Tab to switch to this window.");}
@@ -574,44 +576,68 @@ public sealed partial class DockWindow : Window
             tray.Items.Add(new MenuItem{Header=DateTime.Now.ToString("f"),IsEnabled=false,Opacity=1,Icon=new TextBlock{Text="\uE787",FontFamily=new FontFamily("Segoe Fluent Icons"),FontSize=15}});
         }
     }
+    internal FrameworkElement EmbeddedStartContents(double width,double height,Action dismiss,out Action release)
+    {
+        if(startMenu==null)throw new InvalidOperationException("Start is not ready.");return startMenu.Embed(width,height,dismiss,out release);
+    }
+    internal bool FocusEmbeddedStart()=>startMenu?.FocusSearch()==true;
     internal void Settings()
     {
-        var panel=new StackPanel{Margin=new Thickness(32,8,32,28)};
+        if(appBars?.OpenSettings()==true)return;
+        var dialog=new Window{Title="New Start settings (Beta)",WindowStyle=WindowStyle.None,AllowsTransparency=true,Width=500,Height=Math.Min(740,SystemParameters.WorkArea.Height-32),MinWidth=420,MinHeight=400,Owner=this,WindowStartupLocation=WindowStartupLocation.CenterScreen,ResizeMode=ResizeMode.NoResize};
+        NativeBackdrop.Configure(dialog);dialog.Content=SettingsContents(dialog,dialog.Close,false,out var release);dialog.Closed+=(_,_)=>release();dialog.ShowDialog();
+    }
+    internal FrameworkElement SettingsContents(Window dialog,Action dismiss,bool embedded,out Action release)
+    {
+        var groups=new Dictionary<string,StackPanel>();var navButtons=new Dictionary<string,Button>();
+        var pages=new Grid();var panel=new StackPanel();var navigation=new WrapPanel{Margin=new Thickness(20,0,20,8)};
+        var scrollSettings=new ScrollViewer{Content=pages,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
+        void SelectCategory(string category){settingsCategory=category;foreach(var group in groups)group.Value.Visibility=group.Key==category?Visibility.Visible:Visibility.Collapsed;foreach(var button in navButtons){button.Value.FontWeight=button.Key==category?FontWeights.SemiBold:FontWeights.Normal;button.Value.Opacity=button.Key==category?1:.65;}scrollSettings.ScrollToTop();if(embedded&&pages.IsLoaded&&dialog is AdaptiveAppBarWindow bar)bar.RefitSettings();}
         var contents=new DockPanel();
-        var settingsFrame=new Border{CornerRadius=new CornerRadius(8),BorderThickness=new Thickness(1),BorderBrush=new SolidColorBrush(Color.FromArgb(50,128,128,128)),Child=contents};
-        var dialog=new Window{Title="New Start settings (Beta)",WindowStyle=WindowStyle.None,AllowsTransparency=true,Width=500,Height=Math.Min(740,SystemParameters.WorkArea.Height-32),MinWidth=420,MinHeight=400,Content=settingsFrame,Owner=this,WindowStartupLocation=WindowStartupLocation.CenterScreen,ResizeMode=ResizeMode.NoResize};
-        NativeBackdrop.Configure(dialog);
+        var settingsFrame=new Border{CornerRadius=new CornerRadius(embedded?0:8),BorderThickness=new Thickness(embedded?0:1),BorderBrush=new SolidColorBrush(Color.FromArgb(50,128,128,128)),Background=Brushes.Transparent,Child=contents};
+        if(embedded){var monitor=DesktopDisplays.MonitorFromWindow(new System.Windows.Interop.WindowInteropHelper(dialog).Handle,2);var work=DesktopDisplays.Work(monitor);settingsFrame.MaxHeight=Math.Min(540,Math.Max(220,(work.Bottom-work.Top)/VisualTreeHelper.GetDpi(dialog).DpiScaleY-116));scrollSettings.MaxHeight=Math.Max(100,settingsFrame.MaxHeight-124);}
         var header=new Grid{Margin=new Thickness(32,20,20,12)};
-        var title=new TextBlock{Text="Settings · Beta",FontSize=22,FontWeight=FontWeights.SemiBold,VerticalAlignment=VerticalAlignment.Center};title.MouseLeftButtonDown+=(_,_)=>dialog.DragMove();header.Children.Add(title);
-        panel.Children.Add(new TextBlock{Text="New Start · 0.1.0-beta.1",Opacity=.65,Margin=new Thickness(0,0,0,8)});
-        var close=new Button{Content=new TextBlock{Text="\uE8BB",FontFamily=new FontFamily("Segoe Fluent Icons"),FontSize=14},Width=36,Height=36,Padding=new Thickness(0),HorizontalAlignment=HorizontalAlignment.Right,ToolTip="Close settings"};StartMenuWindow.Borderless(close);close.Click+=(_,_)=>dialog.Close();System.Windows.Automation.AutomationProperties.SetName(close,"Close settings");header.Children.Add(close);
-        DockPanel.SetDock(header,Dock.Top);contents.Children.Add(header);contents.Children.Add(new ScrollViewer{Content=panel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled});
+        var title=new TextBlock{Text="Settings · Beta",FontSize=22,FontWeight=FontWeights.SemiBold,VerticalAlignment=VerticalAlignment.Center};if(!embedded)title.MouseLeftButtonDown+=(_,_)=>dialog.DragMove();header.Children.Add(title);
+        var close=new Button{Content=new TextBlock{Text="\uE8BB",FontFamily=new FontFamily("Segoe Fluent Icons"),FontSize=14},Width=36,Height=36,Padding=new Thickness(0),HorizontalAlignment=HorizontalAlignment.Right,ToolTip="Close settings"};StartMenuWindow.Borderless(close);close.Click+=(_,_)=>dismiss();System.Windows.Automation.AutomationProperties.SetName(close,"Close settings");header.Children.Add(close);
+        DockPanel.SetDock(header,Dock.Top);DockPanel.SetDock(navigation,Dock.Top);contents.Children.Add(header);contents.Children.Add(navigation);contents.Children.Add(scrollSettings);
         var themeTimer=new DispatcherTimer{Interval=TimeSpan.FromSeconds(1)};
         bool? lastDark=null;bool lastHighContrast=SystemParameters.HighContrast,lastTransparency=NativeBackdrop.TransparencyAllowed();
-        void ApplyTheme(){bool dark=Appearance.IsDark(prefs.Theme);if(lastDark!=dark||lastHighContrast!=SystemParameters.HighContrast){lastDark=dark;lastHighContrast=SystemParameters.HighContrast;Appearance.Apply(dialog,dark);}lastTransparency=NativeBackdrop.TransparencyAllowed();Appearance.ApplySurface(dialog,settingsFrame,dark,prefs.StartTransparency,prefs.MenuBlur);UpdateDockBackground();appBars?.Refresh();}
-        dialog.SourceInitialized+=(_,_)=>{lastDark=null;ApplyTheme();};
+        void ApplyTheme(){bool dark=Appearance.IsDark(prefs.Theme);if(lastDark!=dark||lastHighContrast!=SystemParameters.HighContrast){lastDark=dark;lastHighContrast=SystemParameters.HighContrast;if(!embedded)Appearance.Apply(dialog,dark);}lastTransparency=NativeBackdrop.TransparencyAllowed();if(!embedded)Appearance.ApplySurface(dialog,settingsFrame,dark,prefs.StartTransparency,prefs.MenuBlur);UpdateDockBackground();appBars?.Refresh();}
+        if(!embedded)dialog.SourceInitialized+=(_,_)=>{lastDark=null;ApplyTheme();};
         themeTimer.Tick+=(_,_)=>{if(lastDark!=Appearance.IsDark(prefs.Theme)||lastHighContrast!=SystemParameters.HighContrast||lastTransparency!=NativeBackdrop.TransparencyAllowed())ApplyTheme();};
         void Toggle(string label,bool value,Action<bool> set){var c=new CheckBox{Content=label,IsChecked=value,Margin=new Thickness(0,6,0,6)};c.Click+=(_,_)=>set(c.IsChecked==true);panel.Children.Add(c);}
         void Slider(string label,double value,double min,double max,Action<double> set){var t=new TextBlock();var s=new Slider{Minimum=min,Maximum=max,Value=Math.Round(value),TickFrequency=1,IsSnapToTickEnabled=true,SmallChange=1,LargeChange=5,Margin=new Thickness(0,5,0,12)};void Update(){t.Text=$"{label}: {s.Value:0}";set(Math.Round(s.Value));}s.ValueChanged+=(_,_)=>Update();Update();panel.Children.Add(t);panel.Children.Add(s);}
-        void Section(string label){panel.Children.Add(new TextBlock{Text=label,FontSize=15,FontWeight=FontWeights.SemiBold,Margin=new Thickness(0,18,0,12)});}
+        void Section(string label)
+        {
+            string category=label switch{"Appearance & layout" or "Dock details"=>"Dock","Adaptive AppBar · Beta"=>"AppBar","Animations"=>"Motion","Applications & Windows"=>"Windows",_=>label};
+            if(!groups.TryGetValue(category,out var group))
+            {
+                group=new StackPanel{Margin=new Thickness(32,4,32,24)};groups.Add(category,group);pages.Children.Add(group);
+                group.Children.Add(new TextBlock{Text=category,FontSize=15,FontWeight=FontWeights.SemiBold,Margin=new Thickness(0,8,0,14)});
+                var nav=new Button{Content=category,Padding=new Thickness(9,6,9,6),Margin=new Thickness(0,0,5,5)};nav.Click+=(_,_)=>SelectCategory(category);navigation.Children.Add(nav);navButtons.Add(category,nav);
+            }
+            panel=group;
+        }
         Section("Appearance & layout");
         var edges=new ComboBox{ItemsSource=new[]{"Bottom","Top","Left"},SelectedIndex=(int)prefs.Edge,Margin=new Thickness(0,0,0,12)};
         var alignments=new ComboBox{Margin=new Thickness(0,0,0,16)};
         void UpdateAlignments(){alignments.ItemsSource=prefs.Edge==DockEdge.Left?new[]{"Top","Centre","Bottom"}:new[]{"Left","Centre","Right"};alignments.SelectedIndex=(int)prefs.Alignment;}
         UpdateAlignments();
-        edges.SelectionChanged+=(_,_)=>{if(prefs.AppBarEnabled&&edges.SelectedIndex==(int)DockEdge.Top){edges.SelectedIndex=(int)DockEdge.Bottom;return;}prefs.Edge=(DockEdge)edges.SelectedIndex;UpdateAlignments();Refresh(true);Position();dialog.Dispatcher.BeginInvoke(new Action(()=>{dialog.Activate();if(NativeBackdrop.TransparencyAllowed())CustomBackdrop.Apply(dialog,prefs.MenuBlur);}),DispatcherPriority.ContextIdle);};
+        edges.SelectionChanged+=(_,_)=>{if(prefs.AppBarEnabled&&edges.SelectedIndex==(int)DockEdge.Top){edges.SelectedIndex=(int)DockEdge.Bottom;return;}prefs.Edge=(DockEdge)edges.SelectedIndex;UpdateAlignments();Refresh(true);Position();if(!embedded)dialog.Dispatcher.BeginInvoke(new Action(()=>{dialog.Activate();if(NativeBackdrop.TransparencyAllowed())CustomBackdrop.Apply(dialog,prefs.MenuBlur);}),DispatcherPriority.ContextIdle);};
         alignments.SelectionChanged+=(_,_)=>{if(alignments.SelectedIndex>=0){prefs.Alignment=(DockAlignment)alignments.SelectedIndex;Position();}};
         panel.Children.Add(new TextBlock{Text="Dock position",Margin=new Thickness(0,0,0,6)});panel.Children.Add(edges);
         panel.Children.Add(new TextBlock{Text="Alignment",Margin=new Thickness(0,0,0,6)});panel.Children.Add(alignments);
+        Section("Appearance");
+        panel.Children.Add(new TextBlock{Text="Shared colour theme",Margin=new Thickness(0,0,0,6)});
         var themes=new ComboBox{ItemsSource=new[]{"System","Light","Dark"},SelectedIndex=prefs.Theme,Margin=new Thickness(0,0,0,16)};
         themes.SelectionChanged+=(_,_)=>{prefs.Theme=themes.SelectedIndex;ApplyTheme();};panel.Children.Add(themes);
-        Slider("Icon size (px)",prefs.IconSize,16,64,v=>{prefs.IconSize=Math.Round(v);Refresh(true);});
+        Section("Dock");Slider("Icon size (px)",prefs.IconSize,16,64,v=>{prefs.IconSize=Math.Round(v);Refresh(true);});
         Toggle("macOS-style dock background",prefs.DockBackground,v=>{prefs.DockBackground=v;Refresh(true);Position();});
-        panel.Children.Add(new TextBlock{Text="Uses the menu transparency and blur sliders below.",Opacity=.65,FontSize=12,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,8)});
+        panel.Children.Add(new TextBlock{Text="Uses transparency and blur from Appearance.",Opacity=.65,FontSize=12,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,8)});
         Toggle("Reserve space for dock",prefs.ReserveDockSpace,v=>{prefs.ReserveDockSpace=v;Position();});
-        Slider("Menu transparency (%)",prefs.StartTransparency*100,0,100,v=>{prefs.StartTransparency=v/100;startMenu?.UpdateAppearance();ApplyTheme();});
+        Section("Appearance");Slider("Menu transparency (%)",prefs.StartTransparency*100,0,100,v=>{prefs.StartTransparency=v/100;startMenu?.UpdateAppearance();ApplyTheme();});
         Slider("Menu blur (%)",prefs.MenuBlur/60*100,0,100,v=>{prefs.MenuBlur=v*.6;startMenu?.UpdateAppearance();ApplyTheme();});
-        Toggle("Show system controls",prefs.ShowSystemControls,v=>{prefs.ShowSystemControls=v;tray.IsOpen=false;Refresh(true);});
+        Section("Dock");Toggle("Show system controls",prefs.ShowSystemControls,v=>{prefs.ShowSystemControls=v;tray.IsOpen=false;Refresh(true);});
         Toggle("Show Task View",prefs.ShowTaskView,v=>{prefs.ShowTaskView=v;Refresh(true);});
         Toggle("Show Desktop",prefs.ShowDesktop,v=>{prefs.ShowDesktop=v;Refresh(true);});
         Toggle("Use Windows taskbar pins",prefs.FollowWindowsTaskbarPins,v=>{prefs.FollowWindowsTaskbarPins=v;Refresh(true);});
@@ -626,9 +652,11 @@ public sealed partial class DockWindow : Window
         Slider("AppBar animation (ms)",prefs.AppBarAnimationMilliseconds,0,600,v=>prefs.AppBarAnimationMilliseconds=(int)v);
         Toggle("Show clock in AppBar",prefs.AppBarClock,v=>{prefs.AppBarClock=v;appBars?.Refresh();Refresh(true);});
         Toggle("Show date beside AppBar clock",prefs.AppBarDate,v=>{prefs.AppBarDate=v;appBars?.Refresh();});
+        Toggle("Show battery percentage",prefs.AppBarBatteryPercentage,v=>{prefs.AppBarBatteryPercentage=v;appBars?.Refresh();});
+        panel.Children.Add(new TextBlock{Text="The battery indicator appears only on devices where Windows reports a battery.",TextWrapping=TextWrapping.Wrap,FontSize=12,Opacity=.65,Margin=new Thickness(0,2,0,10)});
         var clockFormat=new ComboBox{ItemsSource=new[]{"Clock format: System","Clock format: 12-hour","Clock format: 24-hour"},SelectedIndex=prefs.AppBarClockFormat,Margin=new Thickness(0,0,0,12)};
         clockFormat.SelectionChanged+=(_,_)=>{prefs.AppBarClockFormat=clockFormat.SelectedIndex;appBars?.Refresh();};panel.Children.Add(clockFormat);
-        Toggle("Manage compatible maximised title bars (experimental)",prefs.BorderlessWindows,v=>{prefs.BorderlessWindows=v;appBars?.Borderless.Update();});
+        Section("Windows");Toggle("Manage compatible maximised title bars (experimental)",prefs.BorderlessWindows,v=>{prefs.BorderlessWindows=v;appBars?.Borderless.Update();});
         panel.Children.Add(new TextBlock{Text="Standard Win32 frames only. Custom title bars, games, fullscreen and protected windows are left unchanged. Original caption styles are saved for recovery.",TextWrapping=TextWrapping.Wrap,FontSize=12,Opacity=.7,Margin=new Thickness(0,3,0,8)});
         panel.Children.Add(new TextBlock{Text="Borderless exclusions (executable names or paths, one per line)",TextWrapping=TextWrapping.Wrap});
         var exclusions=new TextBox{Text=string.Join(Environment.NewLine,prefs.BorderlessExclusions),AcceptsReturn=true,MinHeight=54,MaxHeight=100,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,Margin=new Thickness(0,6,0,8)};
@@ -647,11 +675,13 @@ public sealed partial class DockWindow : Window
         var clocks=new ComboBox{ItemsSource=new[]{"Clock hidden","Clock in panel","Clock always visible"},SelectedIndex=prefs.Clock};clocks.SelectionChanged+=(_,_)=>{prefs.Clock=clocks.SelectedIndex;Refresh(true);};panel.Children.Add(clocks);
         Section("Applications & Windows");
         panel.Children.Add(new TextBlock{Text=$"Windows taskbar auto-hide: {(Native.AutoHide?"enabled":"disabled")}",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,12)});
-        var pin=new Button{Content="Pin an application…",Margin=new Thickness(0,4,0,4)};pin.Click+=(_,_)=>{var f=new OpenFileDialog{Filter="Applications and shortcuts|*.exe;*.lnk;*.appref-ms"};if(f.ShowDialog(dialog)==true){dockPins.Place(f.FileName,dockPins.All().Count);Save();Refresh(true);}};panel.Children.Add(pin);
+        Section("Dock");var pin=new Button{Content="Pin an application…",Margin=new Thickness(0,4,0,4)};pin.Click+=(_,_)=>{var f=new OpenFileDialog{Filter="Applications and shortcuts|*.exe;*.lnk;*.appref-ms"};if(f.ShowDialog(dialog)==true){dockPins.Place(f.FileName,dockPins.All().Count);Save();Refresh(true);}};panel.Children.Add(pin);
+        Section("Windows");
         var native=new Button{Content="Windows taskbar preferences",Margin=new Thickness(0,4,0,4)};native.Click+=(_,_)=>Launch("ms-settings:taskbar");panel.Children.Add(native);
-        var exit=new Button{Content="Exit dock — keep Windows taskbar",Margin=new Thickness(0,4,0,4)};exit.Click+=(_,_)=>{dialog.Close();Close();};panel.Children.Add(exit);
-        ApplyTheme();themeTimer.Start();
-        dialog.Closed+=(_,_)=>{themeTimer.Stop();Save();Refresh(true);};dialog.ShowDialog();
+        var exit=new Button{Content="Exit dock — keep Windows taskbar",Margin=new Thickness(0,4,0,4)};exit.Click+=(_,_)=>{dismiss();Close();};panel.Children.Add(exit);
+        navigation.Children.Clear();foreach(string category in new[]{"Dock","AppBar","Appearance","Motion","Windows"})navigation.Children.Add(navButtons[category]);
+        SelectCategory(groups.ContainsKey(settingsCategory)?settingsCategory:"Dock");ApplyTheme();if(!embedded)themeTimer.Start();
+        release=()=>{themeTimer.Stop();Save();Refresh(true);};return settingsFrame;
     }
 }
 

@@ -17,3 +17,4 @@ Media, Core Audio, WLAN and Bluetooth adapters publish event-driven state. WLAN 
 Preferences and caches are created under `%LOCALAPPDATA%/NewStart`. They are not bundled in source or build artifacts. Defaults are independent from the developer's live settings. Pin removal changes only New Start's local state; imported Windows pins remain unchanged.
 
 
+AppBar reuses Start through a reversible content lease and shares the Settings content factory. Expansion cleanup detaches content before restoring its standalone host. AppBarBattery uses GetSystemPowerStatus and registered power notifications, unregistered at disposal.

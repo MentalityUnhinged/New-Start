@@ -23,6 +23,7 @@ public sealed class Preferences
     public int AppBarAnimationMilliseconds {get;set;}=180;
     public bool AppBarClock {get;set;}=true;
     public bool AppBarDate {get;set;}
+    public bool AppBarBatteryPercentage {get;set;}
     public int AppBarClockFormat {get;set;} // System, 12-hour, 24-hour
     public bool BorderlessWindows {get;set;}
     public List<string> BorderlessExclusions {get;set;}=new();

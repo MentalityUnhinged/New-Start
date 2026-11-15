@@ -30,6 +30,7 @@ internal sealed class StartMenuWindow : Window
     bool? lastDark;
     bool lastHighContrast;
     bool draggingApp;bool appContextOpen;DateTime suppressLaunchUntil;
+    Action? embeddedDismiss;
     readonly Button powerButton;
     readonly FrameworkElement powerVisual;
     internal bool PowerIconFits
@@ -73,10 +74,25 @@ internal sealed class StartMenuWindow : Window
     }
     internal void Dismiss()
     {
+        if(embeddedDismiss!=null){embeddedDismiss();Dismissed?.Invoke();return;}
         if(!IsVisible)return;
         if(Owner==null&&DockHost==null){Close();return;}
         CustomBackdrop.Hide(this);Hide();Dismissed?.Invoke();allApps=false;page=0;search.Clear();data=StartCatalog.Current;Render();
     }
+    internal FrameworkElement Embed(double width,double height,Action dismiss,out Action release)
+    {
+        if(IsVisible)Dismiss();
+        var saved=(frame.Width,frame.Height,frame.BorderThickness,frame.CornerRadius,frame.BorderBrush);
+        Content=null;embeddedDismiss=dismiss;frame.Width=width;frame.Height=height;frame.BorderThickness=new Thickness(0);frame.CornerRadius=new CornerRadius(0);frame.BorderBrush=Brushes.Transparent;frame.Background=Brushes.Transparent;
+        data=StartCatalog.Current;Render();UpdateAppearance();_=StartCatalog.Refresh();
+        release=()=>{
+            embeddedDismiss=null;(frame.Width,frame.Height,frame.BorderThickness,frame.CornerRadius,frame.BorderBrush)=saved;
+            allApps=false;page=0;search.Clear();data=StartCatalog.Current;Render();Content=frame;
+        };
+        return frame;
+    }
+    internal bool FocusSearch()=>search.Focus();
+    Window ModalOwner=>Window.GetWindow(frame)??this;
     internal StartMenuWindow(Preferences preferences,bool sectionPreview=false)
     {
         prefs=preferences;Title="New Start (Beta)";Width=640;Height=Math.Min(660,SystemParameters.WorkArea.Height-30);
@@ -147,7 +163,7 @@ internal sealed class StartMenuWindow : Window
             var iconFrame=new Grid{Width=24,Height=24,ClipToBounds=true};iconFrame.Children.Add(glyph);
             var button=new Button{Content=iconFrame,Width=36,Height=44,Padding=new Thickness(0),ClipToBounds=true,VerticalAlignment=VerticalAlignment.Center,ToolTip=shortcut.Name};
             Borderless(button);System.Windows.Automation.AutomationProperties.SetName(button,shortcut.Name);
-            button.Click+=(_,_)=>{try{Launch(shortcut.Target());}catch(Exception e){modalOpen=true;try{MessageBox.Show(this,e.Message,"Could not open "+shortcut.Name);}finally{modalOpen=false;}}};
+            button.Click+=(_,_)=>{try{Launch(shortcut.Target());}catch(Exception e){modalOpen=true;try{MessageBox.Show(ModalOwner,e.Message,"Could not open "+shortcut.Name);}finally{modalOpen=false;}}};
             shortcuts.Children.Add(button);
         }
         shortcuts.Children.Add(power);Grid.SetColumn(shortcuts,1);footer.Children.Add(shortcuts);footer.Children.Add(user);Put(footer,4);
@@ -184,7 +200,7 @@ internal sealed class StartMenuWindow : Window
     {
             bool dark=Appearance.IsDark(prefs.Theme);
             if(lastDark!=dark||lastHighContrast!=SystemParameters.HighContrast){Appearance.Apply(this,dark);lastDark=dark;lastHighContrast=SystemParameters.HighContrast;}
-        Appearance.ApplySurface(this,frame,dark,prefs.StartTransparency,prefs.MenuBlur);
+        if(embeddedDismiss==null)Appearance.ApplySurface(this,frame,dark,prefs.StartTransparency,prefs.MenuBlur);else frame.Background=Brushes.Transparent;
         search.Background=new SolidColorBrush(dark?Color.FromRgb(46,46,46):Colors.White);search.Foreground=Foreground;
     }
     void Put(UIElement element,int row){Grid.SetRow(element,row);layout.Children.Add(element);}
@@ -198,8 +214,8 @@ internal sealed class StartMenuWindow : Window
         button.Template=template;
     }
     static void Add(ContextMenu menu,string name,Action action){var i=new MenuItem{Header=name};i.Click+=(_,_)=>action();menu.Items.Add(i);}
-    void Power(string verb,string arguments){modalOpen=true;try{if(MessageBox.Show(this,"Do you want to "+verb+" this PC?","Power",MessageBoxButton.YesNo)==MessageBoxResult.Yes){Process.Start(new ProcessStartInfo("shutdown.exe",arguments){UseShellExecute=false,CreateNoWindow=true});Dismiss();}}finally{modalOpen=false;}}
-    void Launch(string target){try{Process.Start(new ProcessStartInfo(target){UseShellExecute=true});Dismiss();}catch(Exception e){modalOpen=true;try{MessageBox.Show(this,e.Message,"Could not open app");}finally{modalOpen=false;}}}
+    void Power(string verb,string arguments){modalOpen=true;try{if(MessageBox.Show(ModalOwner,"Do you want to "+verb+" this PC?","Power",MessageBoxButton.YesNo)==MessageBoxResult.Yes){Process.Start(new ProcessStartInfo("shutdown.exe",arguments){UseShellExecute=false,CreateNoWindow=true});Dismiss();}}finally{modalOpen=false;}}
+    void Launch(string target){try{Process.Start(new ProcessStartInfo(target){UseShellExecute=true});Dismiss();}catch(Exception e){modalOpen=true;try{MessageBox.Show(ModalOwner,e.Message,"Could not open app");}finally{modalOpen=false;}}}
     static bool SameApp(string left,string right)=>string.Equals(PinIdentity.Resolve(left),PinIdentity.Resolve(right),StringComparison.OrdinalIgnoreCase);
     List<StartApp> VisiblePins()
     {

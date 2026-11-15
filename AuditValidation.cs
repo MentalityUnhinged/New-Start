@@ -35,6 +35,12 @@ internal static class AuditValidation
     internal static void Run()
     {
         var checks=new Dictionary<string,bool>();
+        checks["NoBatteryHidesMeter"]=!BatteryReading.FromStatus(true,128,255,1).Present;
+        checks["UnknownBatteryDoesNotInventDevice"]=!BatteryReading.FromStatus(true,255,255,255).Present;
+        checks["FailedPowerQueryHidesMeter"]=!BatteryReading.FromStatus(false,0,0,0).Present;
+        var charging=BatteryReading.FromStatus(true,8,73,1);
+        checks["BatteryLevelAndChargingPreserved"]=charging.Present&&charging.Percentage==73&&charging.Charging&&charging.PluggedIn;
+        checks["UnknownBatteryLevelIsNotZero"]=BatteryReading.FromStatus(true,1,255,0) is {Present:true,Percentage:null};
         var prefs=JsonSerializer.Deserialize<Preferences>("""{"IconSize":17.8,"Theme":99,"Clock":-1,"Pins":[null,"","C:\\Apps\\One.exe","c:\\apps\\one.exe"],"HiddenTaskbarPins":null,"DockPinOrder":[null," "]}""")!;
         prefs.Magnification=double.NaN;prefs.BounceHeight=double.PositiveInfinity;prefs.Normalize();
         checks["MalformedPreferencesRecover"]=prefs.IconSize==18&&prefs.Theme==2&&prefs.Clock==0&&prefs.Magnification==1.25&&prefs.BounceHeight==10;

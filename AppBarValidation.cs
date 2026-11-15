@@ -11,6 +11,7 @@ public sealed partial class DockWindow
 {
     internal async Task VerifyAppBar()
     {
+        suppressSettingsPersistence=true;
         var saved=(prefs.AppBarEnabled,prefs.AppBarAllMonitors,prefs.BorderlessWindows,prefs.Edge,prefs.Alignment,prefs.AppBarAnimations,prefs.AppBarTransparency,prefs.AppBarBlur,prefs.Theme,prefs.AppBarMediaHover);
         var checks=new Dictionary<string,bool>();var details=new List<object>();
         var baseline=DesktopDisplays.All().ToDictionary(display=>display.Name,display=>DesktopDisplays.Work(display.Handle));
@@ -28,12 +29,17 @@ public sealed partial class DockWindow
                 checks[key+"ReservationFixed"]=reserved.Bottom-reserved.Top==(int)Math.Ceiling(AdaptiveAppBarWindow.RestHeight*System.Windows.Media.VisualTreeHelper.GetDpi(bar).DpiScaleY);
                 checks[key+"WorkAreaBelowBar"]=resting.Top>=reserved.Bottom;
                 checks[key+"ClockCenteredOnDisplay"]=bar.ClockIsCentered;
+                bar.Expand(AppBarSection.Audio);bar.RefreshContent();await Task.Delay(700);
+                checks[key+"AudioSurvivesMetadataRefresh"]=bar.Section==AppBarSection.Audio;bar.Collapse(false);
+                bar.Toggle(AppBarSection.Audio);await Task.Delay(450);checks[key+"AudioClickStaysOpen"]=bar.Section==AppBarSection.Audio;
+                bar.Toggle(AppBarSection.Audio);await Task.Delay(300);checks[key+"AudioSecondClickCloses"]=bar.Section==AppBarSection.None;
                 foreach(var section in Enum.GetValues<AppBarSection>().Where(section=>section!=AppBarSection.None))
                 {
                     bar.Expand(section);await Task.Delay(350);
                     var expanded=DesktopDisplays.Work(bar.Display.Handle);
                     checks[key+section+"OverlayOnly"]=Same(resting,expanded)&&bar.ActualHeight>AdaptiveAppBarWindow.RestHeight;
                     checks[key+section+"ContinuousMaterial"]=bar.HasContinuousMaterial;
+                    if(section==AppBarSection.Settings)checks[key+"SettingsHasNoSeparateWindow"]=!Application.Current.Windows.Cast<Window>().Any(window=>window.IsVisible&&window.Title=="New Start settings (Beta)");
                     bar.Collapse();await Task.Delay(300);
                     checks[key+section+"Collapses"]=bar.Section==AppBarSection.None&&Math.Abs(bar.ActualHeight-AdaptiveAppBarWindow.RestHeight)<1;
                     if(!checks[key+section+"Collapses"])details.Add(new{Failure="Collapse",Section=bar.Section.ToString(),Requested=section.ToString(),bar.Height,bar.ActualHeight,bar.SurfaceUpdates,bar.Repositions});
@@ -47,13 +53,8 @@ public sealed partial class DockWindow
                     bool effects=NativeBackdrop.TransparencyAllowed();checks[key+$"Theme{theme}T{transparency}B{blur}"]=bar.BlurVisible==(effects&&blur>0)&&Math.Abs(bar.MaterialOpacity-(effects?1-transparency:1))<.001;
                 }
                 checks[key+"IndependentAppearance"]=prefs.StartTransparency==menuTransparency&&prefs.MenuBlur==menuBlur;
-                var anchor=new Native.Rect{Left=reserved.Left+8,Top=reserved.Top,Right=reserved.Left+42,Bottom=reserved.Bottom};
-                ToggleStartFromAppBar(anchor,bar.Display);await Task.Delay(200);
-                if(startMenu!=null)
-                {
-                    DesktopDisplays.GetWindowRect(new System.Windows.Interop.WindowInteropHelper(startMenu).Handle,out var menuBounds);
-                    checks[key+"StartOpensBelowBar"]=startMenu.IsVisible&&menuBounds.Top>=reserved.Bottom&&menuBounds.Left>=DisplayLeft(bar)&&menuBounds.Right<=bar.Display.Bounds.Right;startMenu.Dismiss();
-                }
+                bar.Expand(AppBarSection.Start);await Task.Delay(350);
+                checks[key+"StartSharesAppBarSurface"]=bar.Section==AppBarSection.Start&&bar.HasContinuousMaterial&&startMenu?.IsVisible==false;bar.Collapse(false);
                 details.Add(new{Display=key,Dpi=System.Windows.Media.VisualTreeHelper.GetDpi(bar).DpiScaleX,Bounds=reserved,Audio=appBars.Audio.Output,AudioError=appBars.Audio.Error,Media=appBars.Media.Title,MediaError=appBars.Media.Error,Network=appBars.Network.Status,Bluetooth=appBars.Bluetooth.Status});
             }
             if(appBars!=null)
@@ -81,10 +82,10 @@ public sealed partial class DockWindow
         {
             appBars?.Dispose();appBars=null;(prefs.AppBarEnabled,prefs.AppBarAllMonitors,prefs.BorderlessWindows,prefs.Edge,prefs.Alignment,prefs.AppBarAnimations,prefs.AppBarTransparency,prefs.AppBarBlur,prefs.Theme,prefs.AppBarMediaHover)=saved;
             UpdateAppBars();Refresh(true);UpdateLayout();Position();
-            File.WriteAllText(Path.Combine(Preferences.Folder,"appbar-verification.json"),JsonSerializer.Serialize(new{Checks=checks,Displays=details},new JsonSerializerOptions{WriteIndented=true}));Close();
+            File.WriteAllText(Path.Combine(Preferences.Folder,"appbar-verification.json"),JsonSerializer.Serialize(new{Checks=checks,Displays=details},new JsonSerializerOptions{WriteIndented=true}));Close();suppressSettingsPersistence=false;
         }
     }
     static bool Same(Native.Rect a,Native.Rect b)=>a.Left==b.Left&&a.Top==b.Top&&a.Right==b.Right&&a.Bottom==b.Bottom;
     static int DisplayLeft(AdaptiveAppBarWindow bar)=>bar.Display.Bounds.Left;
-    internal void PreviewAppBar(){prefs.AppBarEnabled=true;prefs.BorderlessWindows=false;prefs.AppBarTransparency=.35;prefs.AppBarBlur=16;if(prefs.Edge==DockEdge.Top)prefs.Edge=DockEdge.Bottom;UpdateAppBars();if(appBars!=null)foreach(var bar in appBars.Windows){bar.ShowInTaskbar=true;bar.Testing=true;bar.RefreshContent();}Refresh(true);Position();}
+    internal void PreviewAppBar(){prefs.AppBarEnabled=true;prefs.BorderlessWindows=false;prefs.AppBarTransparency=.35;prefs.AppBarBlur=16;if(prefs.Edge==DockEdge.Top)prefs.Edge=DockEdge.Bottom;UpdateAppBars();if(appBars!=null)foreach(var bar in appBars.Windows){bar.ShowInTaskbar=true;bar.Testing=false;bar.RefreshContent();}Refresh(true);Position();}
 }

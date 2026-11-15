@@ -15,7 +15,7 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 
 namespace NewStart;
-internal enum AppBarSection { None,Media,Audio,Network,Bluetooth,Clock,Application }
+internal enum AppBarSection { None,Media,Audio,Network,Bluetooth,Clock,Application,Settings,Start }
 internal sealed class AdaptiveAppBars:IDisposable
 {
     readonly DockWindow dock;internal readonly Preferences Preferences;
@@ -52,14 +52,15 @@ internal sealed class AdaptiveAppBars:IDisposable
         dock.AppBarDisplaysChanged();
     }
     internal void Refresh(bool displays=false){if(disposed)return;if(displays)Reconcile();Borderless.Update();foreach(var bar in bars.Values)bar.RefreshContent();}
-    internal void CollapseOthers(AdaptiveAppBarWindow selected){foreach(var bar in bars.Values)if(bar!=selected)bar.Collapse();}
+    internal void CollapseOthers(AdaptiveAppBarWindow selected){foreach(var bar in bars.Values)if(bar!=selected)bar.Collapse(false);}
     internal void OpenStart(AdaptiveAppBarWindow bar,FrameworkElement button)
     {
-        CollapseOthers(bar);bar.Collapse();var point=button.PointToScreen(new Point());
-        var dpi=VisualTreeHelper.GetDpi(bar);var anchor=new Native.Rect{Left=(int)point.X,Top=(int)point.Y,Right=(int)(point.X+button.ActualWidth*dpi.DpiScaleX),Bottom=(int)(point.Y+button.ActualHeight*dpi.DpiScaleY)};
-        dock.ToggleStartFromAppBar(anchor,bar.Display);
+        bar.Toggle(AppBarSection.Start);
     }
-    internal void Settings()=>dock.Settings();
+    internal bool OpenSettings(){var monitor=DesktopDisplays.MonitorFromWindow(Native.GetForegroundWindow(),2);var bar=bars.Values.FirstOrDefault(bar=>bar.Display.Handle==monitor)??bars.Values.FirstOrDefault();if(bar==null)return false;bar.Toggle(AppBarSection.Settings);return true;}
+    internal FrameworkElement SettingsContents(Window owner,Action dismiss,out Action release)=>dock.SettingsContents(owner,dismiss,true,out release);
+    internal FrameworkElement StartContents(double width,double height,Action dismiss,out Action release)=>dock.EmbeddedStartContents(width,height,dismiss,out release);
+    internal bool FocusStart()=>dock.FocusEmbeddedStart();
     public void Dispose()
     {
         if(disposed)return;disposed=true;SystemEvents.DisplaySettingsChanged-=DisplaysChanged;SystemEvents.UserPreferenceChanged-=UserPreferenceChanged;
@@ -84,6 +85,11 @@ internal sealed class AdaptiveAppBarWindow:Window
     readonly DispatcherTimer hoverTimer=new(){Interval=TimeSpan.FromMilliseconds(300)};
     readonly Dictionary<AppBarSection,Button> buttons=new();
     readonly StackPanel windowControls=new(){Orientation=Orientation.Horizontal};
+    readonly StackPanel battery=new(){Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(8,0,8,0),Visibility=Visibility.Collapsed};
+    readonly Rectangle batteryFill=new(){Height=8,RadiusX=1,RadiusY=1};
+    readonly TextBlock batteryPercent=new(){FontSize=12,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(6,0,0,0)};
+    readonly System.Windows.Shapes.Path chargingMark=new(){Data=Geometry.Parse("M 14,1 L 9,8 L 13,8 L 9,15"),StrokeThickness=1.7};
+    readonly List<IntPtr> powerNotifications=new();
     Button clock=null!,media=null!,audio=null!,network=null!,bluetooth=null!;
     DockReservation? reservation;HwndSource? source;AppBarSection current;double expandedWidth=420;bool closing,repositioning;int appIconVersion;
     bool? dark;bool highContrast;
@@ -94,6 +100,7 @@ internal sealed class AdaptiveAppBarWindow:Window
     Slider? volumeSlider;Button? muteButton;TextBlock? audioStatus;bool syncingVolume;
     TextBlock? networkStatus;
     DateTime calendarMonth=new(DateTime.Today.Year,DateTime.Today.Month,1),calendarSelection=DateTime.Today;
+    bool hoverExpansion,focusStartPending,settingsFitQueued;Action? releaseContent;
     internal AppBarSection Section=>current;
     internal bool Testing {get;set;}
     internal double ReservedHeight=>RestHeight;
@@ -122,6 +129,7 @@ internal sealed class AdaptiveAppBarWindow:Window
         header.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});header.ColumnDefinitions.Add(new ColumnDefinition());header.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
         var left=new StackPanel{Orientation=Orientation.Horizontal};header.Children.Add(left);
         var start=Compact(new Ellipse{Width=16,Height=16,StrokeThickness=1.5},"Start",()=>host.OpenStart(this,(FrameworkElement)left.Children[0]));
+        buttons[AppBarSection.Start]=start;
         ((Ellipse)start.Content).SetBinding(Shape.StrokeProperty,new System.Windows.Data.Binding("Foreground"){Source=start});left.Children.Add(start);
         var titlePanel=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};titlePanel.Children.Add(applicationIcon);titlePanel.Children.Add(application);
         var appButton=Compact(titlePanel,"Active application",()=>Toggle(AppBarSection.Application));left.Children.Add(appButton);buttons[AppBarSection.Application]=appButton;
@@ -129,29 +137,41 @@ internal sealed class AdaptiveAppBarWindow:Window
         media=SectionButton(right,AppBarSection.Media,"\uE8D6","Media");
         media.MouseEnter+=(_,_)=>{if(Prefs.AppBarMediaHover&&current==AppBarSection.None)hoverTimer.Start();};media.MouseLeave+=(_,_)=>hoverTimer.Stop();
         audio=SectionButton(right,AppBarSection.Audio,"\uE767","Volume");network=SectionButton(right,AppBarSection.Network,"\uE701","Wi-Fi");bluetooth=SectionButton(right,AppBarSection.Bluetooth,"\uE702","Bluetooth");
+        var batteryDrawing=new Canvas{Width=26,Height=16};var batteryOutline=new Rectangle{Width=21,Height=14,RadiusX=2,RadiusY=2,StrokeThickness=1.3};batteryOutline.SetResourceReference(Shape.StrokeProperty,"Text");Canvas.SetTop(batteryOutline,1);batteryDrawing.Children.Add(batteryOutline);
+        var terminal=new Rectangle{Width=2,Height=6};terminal.SetResourceReference(Shape.FillProperty,"Text");Canvas.SetLeft(terminal,22);Canvas.SetTop(terminal,5);batteryDrawing.Children.Add(terminal);
+        batteryFill.SetResourceReference(Shape.FillProperty,"Text");Canvas.SetLeft(batteryFill,3);Canvas.SetTop(batteryFill,4);batteryDrawing.Children.Add(batteryFill);chargingMark.SetResourceReference(Shape.StrokeProperty,"Accent");batteryDrawing.Children.Add(chargingMark);battery.Children.Add(batteryDrawing);battery.Children.Add(batteryPercent);right.Children.Add(battery);
         clock=Compact("", "Clock",()=>Toggle(AppBarSection.Clock));clock.HorizontalAlignment=HorizontalAlignment.Center;Grid.SetColumnSpan(clock,3);header.Children.Add(clock);buttons[AppBarSection.Clock]=clock;
-        right.Children.Add(Compact("\uE713","New Start settings",host.Settings,true));right.Children.Add(windowControls);
+        var settings=Compact("\uE713","New Start settings",()=>Toggle(AppBarSection.Settings),true);right.Children.Add(settings);buttons[AppBarSection.Settings]=settings;right.Children.Add(windowControls);
         bodyHit.Background=new SolidColorBrush(Color.FromArgb(1,0,0,0));bodyScroll.Content=body;bodyHit.Child=bodyScroll;bodyHit.Visibility=Visibility.Collapsed;
-        MouseLeave+=(_,_)=>{if(current!=AppBarSection.None)leaveTimer.Start();};MouseEnter+=(_,_)=>leaveTimer.Stop();
-        bodyHit.MouseLeave+=(_,_)=>{if(current!=AppBarSection.None)leaveTimer.Start();};bodyHit.MouseEnter+=(_,_)=>leaveTimer.Stop();
-        leaveTimer.Tick+=(_,_)=>{leaveTimer.Stop();if(body.IsKeyboardFocusWithin&&Keyboard.FocusedElement is PasswordBox or System.Windows.Controls.Primitives.TextBoxBase)return;if(!IsMouseOver){if(Mouse.LeftButton==MouseButtonState.Pressed)leaveTimer.Start();else Collapse();}};
-        hoverTimer.Tick+=(_,_)=>{hoverTimer.Stop();if(media.IsMouseOver&&current==AppBarSection.None)Expand(AppBarSection.Media);};
+        MouseLeave+=(_,_)=>{if(hoverExpansion)leaveTimer.Start();};MouseEnter+=(_,_)=>leaveTimer.Stop();
+        bodyHit.MouseLeave+=(_,_)=>{if(hoverExpansion)leaveTimer.Start();};bodyHit.MouseEnter+=(_,_)=>leaveTimer.Stop();
+        leaveTimer.Tick+=(_,_)=>{leaveTimer.Stop();if(hoverExpansion&&!IsMouseOver){if(Mouse.LeftButton==MouseButtonState.Pressed)leaveTimer.Start();else Collapse();}};
+        hoverTimer.Tick+=(_,_)=>{hoverTimer.Stop();if(media.IsMouseOver&&current==AppBarSection.None)Expand(AppBarSection.Media,true);};
         PreviewKeyDown+=(_,e)=>{if(e.Key==Key.Escape){Collapse();e.Handled=true;}};
-        Deactivated+=(_,_)=>{if(!Testing&&current!=AppBarSection.None)Collapse();};
+        Deactivated+=(_,_)=>Dispatcher.BeginInvoke(new Action(()=>{
+            if(closing||Testing||current==AppBarSection.None)return;
+            var foreground=Native.GetForegroundWindow();var own=new WindowInteropHelper(this).Handle;
+            if(foreground!=IntPtr.Zero&&foreground!=own&&!IsOwnedBy(foreground,own))Collapse();
+        }),DispatcherPriority.Input);
         host.Applications.Changed+=ApplicationChanged;host.Audio.Changed+=AudioChanged;host.Media.Changed+=MediaChanged;host.Network.Changed+=NetworkChanged;host.Bluetooth.Changed+=BluetoothChanged;
         Loaded+=(_,_)=>{
             source=HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);source?.AddHook(Hook);
+            foreach(var setting in AppBarBattery.Notifications){var id=setting;var token=AppBarBattery.RegisterPowerSettingNotification(source!.Handle,ref id,0);if(token!=IntPtr.Zero)powerNotifications.Add(token);}UpdateBattery();
             reservation=new DockReservation(this,()=>Display.Handle);reservation.Changed+=Reposition;Reposition();RefreshContent();clockTimer.Start();
         };
         SizeChanged+=(_,_)=>UpdateSurface();clockTimer.Tick+=(_,_)=>UpdateClock();
         Closed+=(_,_)=>{
-            closing=true;clockTimer.Stop();leaveTimer.Stop();hoverTimer.Stop();source?.RemoveHook(Hook);reservation?.Dispose();material.Dispose();
+            closing=true;ClearBody();clockTimer.Stop();leaveTimer.Stop();hoverTimer.Stop();source?.RemoveHook(Hook);reservation?.Dispose();material.Dispose();
+            foreach(var token in powerNotifications)AppBarBattery.UnregisterPowerSettingNotification(token);powerNotifications.Clear();
             host.Applications.Changed-=ApplicationChanged;host.Audio.Changed-=AudioChanged;host.Media.Changed-=MediaChanged;host.Network.Changed-=NetworkChanged;host.Bluetooth.Changed-=BluetoothChanged;
         };
     }
+    [DllImport("user32.dll")]static extern IntPtr GetWindow(IntPtr window,uint command);
+    static bool IsOwnedBy(IntPtr window,IntPtr owner){for(int i=0;i<16&&window!=IntPtr.Zero;i++){window=GetWindow(window,4);if(window==owner)return true;}return false;}
     IntPtr Hook(IntPtr hwnd,int message,IntPtr wParam,IntPtr lParam,ref bool handled)
     {
         if(message==0x007E||message==0x02E0){Collapse(false);host.QueueDisplays();}
+        if(message==0x0218)UpdateBattery();
         return IntPtr.Zero;
     }
     Button Compact(object content,string name,Action action,bool glyph=false)
@@ -203,6 +223,7 @@ internal sealed class AdaptiveAppBarWindow:Window
         bodyHit.Visibility=Visibility.Visible;bodyHit.Width=lobeWidth;bodyHit.Height=extra;bodyHit.Margin=new Thickness(left,RestHeight,0,0);
         bodyScroll.Width=expandedWidth;bodyScroll.HorizontalAlignment=HorizontalAlignment.Center;
         bodyScroll.Opacity=Math.Clamp((extra/Math.Max(1,targetExtra)-.3)/.7,0,1);
+        if(focusStartPending&&current==AppBarSection.Start&&extra>24)focusStartPending=!host.FocusStart();
     }
     void Morph(DependencyProperty property,double target,bool animate)
     {
@@ -218,39 +239,50 @@ internal sealed class AdaptiveAppBarWindow:Window
         if(animate&&Prefs.AppBarAnimations&&SystemParameters.ClientAreaAnimation&&Prefs.AppBarAnimationMilliseconds>0)
         {
             var animation=new DoubleAnimation(from,height,TimeSpan.FromMilliseconds(Prefs.AppBarAnimationMilliseconds)){EasingFunction=new CubicEase{EasingMode=EasingMode.EaseOut},FillBehavior=FillBehavior.Stop};
-            animation.Completed+=(_,_)=>{if(closing||version!=animationGeneration)return;BeginAnimation(HeightProperty,null);Height=height;UpdateSurface();};
+            animation.Completed+=(_,_)=>{if(closing||version!=animationGeneration)return;BeginAnimation(HeightProperty,null);Height=height;UpdateSurface();if(current==AppBarSection.None)ClearBody();};
             BeginAnimation(HeightProperty,animation,HandoffBehavior.SnapshotAndReplace);
         }
     }
-    internal void Toggle(AppBarSection section){if(current==section)Collapse();else Expand(section);}
-    internal void Expand(AppBarSection section)
+    internal void Toggle(AppBarSection section){Activate();if(current==section){if(hoverExpansion){hoverExpansion=false;leaveTimer.Stop();}else Collapse();}else Expand(section);}
+    internal void Expand(AppBarSection section,bool fromHover=false)
     {
         bool opening=current==AppBarSection.None&&ActualHeight<=RestHeight+1;
-        host.CollapseOthers(this);hoverTimer.Stop();leaveTimer.Stop();current=section;
-        expandedWidth=Math.Min(440,Math.Max(100,ActualWidth-16));
+        host.CollapseOthers(this);hoverTimer.Stop();leaveTimer.Stop();current=section;hoverExpansion=fromHover;
+        expandedWidth=Math.Min(section==AppBarSection.Start?680:section==AppBarSection.Settings?580:440,Math.Max(100,ActualWidth-16));
         double anchor=ActualWidth/2;
         if(buttons.TryGetValue(section,out var button))anchor=button.TranslatePoint(new Point(button.ActualWidth/2,0),this).X;
-        Morph(LobeCentreProperty,anchor,!opening);Morph(LobeWidthProperty,expandedWidth,true);
-        BuildBody();FitExpansion();UpdateSurface();
+        Morph(LobeCentreProperty,anchor,!opening);
+        BuildBody();Morph(LobeWidthProperty,expandedWidth,true);FitExpansion();UpdateSurface();
         if(section==AppBarSection.Network)_=host.Network.Refresh(true);
     }
     void FitExpansion()
     {
         if(current==AppBarSection.None)return;
-        double limit=current switch{AppBarSection.Media=>220,AppBarSection.Audio=>300,AppBarSection.Application=>180,_=>300};
+        double limit=current switch{AppBarSection.Start=>740,AppBarSection.Settings=>620,AppBarSection.Media=>220,AppBarSection.Audio=>300,AppBarSection.Application=>180,_=>300};
         body.Measure(new Size(expandedWidth,double.PositiveInfinity));double target=Math.Clamp(Math.Ceiling(body.DesiredSize.Height)+4,44,limit);
         double scale=VisualTreeHelper.GetDpi(this).DpiScaleY;double maximum=(Display.Bounds.Bottom-Display.Bounds.Top)/scale-RestHeight-24;
         double height=RestHeight+Math.Max(40,Math.Min(target,maximum));if(Math.Abs(Height-height)>.5)AnimateHeight(height);
     }
-    internal void Collapse(bool animate=true){if(current==AppBarSection.None&&Height==RestHeight)return;current=AppBarSection.None;hoverTimer.Stop();leaveTimer.Stop();Morph(LobeWidthProperty,44,animate);AnimateHeight(RestHeight,animate);}
+    internal void RefitSettings()
+    {
+        if(closing||current!=AppBarSection.Settings||settingsFitQueued)return;settingsFitQueued=true;
+        Dispatcher.BeginInvoke(new Action(()=>{settingsFitQueued=false;if(!closing&&current==AppBarSection.Settings){body.InvalidateMeasure();FitExpansion();}}),DispatcherPriority.ContextIdle);
+    }
+    internal void Collapse(bool animate=true){if(current==AppBarSection.None&&Height==RestHeight)return;current=AppBarSection.None;hoverExpansion=false;focusStartPending=false;hoverTimer.Stop();leaveTimer.Stop();Morph(LobeWidthProperty,44,animate);AnimateHeight(RestHeight,animate);if(!animate||!Prefs.AppBarAnimations||!SystemParameters.ClientAreaAnimation||Prefs.AppBarAnimationMilliseconds==0)ClearBody();}
+    void ClearBody(){body.Children.Clear();var release=releaseContent;releaseContent=null;release?.Invoke();}
     void Text(string value,double size=13){body.Children.Add(new TextBlock{Text=value,FontSize=size,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,8)});}
     Button Action(string label,Action action,Panel? parent=null,bool enabled=true){var button=new Button{Content=label,IsEnabled=enabled,Margin=new Thickness(0,0,6,6),Padding=new Thickness(10,6,10,6)};button.Click+=(_,_)=>action();(parent??body).Children.Add(button);return button;}
     internal static void Open(string uri){try{Process.Start(new ProcessStartInfo(uri){UseShellExecute=true});}catch(Exception e){MessageBox.Show(e.Message,"New Start");}}
     void BuildBody()
     {
-        body.Children.Clear();volumeSlider=null;muteButton=null;audioStatus=null;networkStatus=null;
+        ClearBody();volumeSlider=null;muteButton=null;audioStatus=null;networkStatus=null;
         switch(current)
         {
+            case AppBarSection.Settings:
+                body.Children.Add(host.SettingsContents(this,()=>Collapse(),out releaseContent));break;
+            case AppBarSection.Start:
+                double available=(Display.Bounds.Bottom-Display.Bounds.Top)/VisualTreeHelper.GetDpi(this).DpiScaleY-RestHeight-64;
+                body.Children.Add(host.StartContents(expandedWidth-32,Math.Min(660,Math.Max(180,available)),()=>Collapse(),out releaseContent));focusStartPending=true;break;
             case AppBarSection.Media:
                 var media=host.Media;
                 var row=new StackPanel{Orientation=Orientation.Horizontal};body.Children.Add(row);
@@ -357,10 +389,9 @@ internal sealed class AdaptiveAppBarWindow:Window
             if((saved.Style&0x80000)!=0)windowControls.Children.Add(Compact("\uE8BB","Close active window",()=>{if(host.Applications.ValidTarget(saved))Native.CloseWindow(saved.Handle);},true));
         }
         int version=++appIconVersion;applicationIcon.Source=null;
-        if(target!=null){var icon=await StartCatalog.Icon(target.Path);if(!closing&&version==appIconVersion)applicationIcon.Source=icon;}
+        if(target!=null){var icon=await StartCatalog.Icon(target.Path);if(closing||version!=appIconVersion)return;applicationIcon.Source=icon;}
         if(current==AppBarSection.Application)BuildBody();
         if(target?.Fullscreen==true&&sameMonitor){Collapse(false);Topmost=false;}else Topmost=true;
-        if(current!=AppBarSection.None&&Native.GetForegroundWindow()==target?.Handle)Collapse();
     }
     void UpdateClock()
     {
@@ -368,5 +399,14 @@ internal sealed class AdaptiveAppBarWindow:Window
         string text=DateTime.Now.ToString(format,CultureInfo.CurrentCulture)+(Prefs.AppBarDate?"  "+DateTime.Now.ToString("d",CultureInfo.CurrentCulture):"");
         if(clock.Content?.ToString()!=text)clock.Content=text;clock.Visibility=Prefs.AppBarClock?Visibility.Visible:Visibility.Collapsed;
     }
-    internal void RefreshContent(){UpdateAppearance();UpdateClock();ApplicationChanged();AudioChanged();MediaChanged();NetworkChanged();BluetoothChanged();}
+    void UpdateBattery()
+    {
+        var reading=AppBarBattery.Read();battery.Visibility=reading.Present?Visibility.Visible:Visibility.Collapsed;
+        if(!reading.Present)return;
+        batteryFill.Width=reading.Percentage is int percentage?16*percentage/100d:0;
+        chargingMark.Visibility=reading.Charging?Visibility.Visible:Visibility.Collapsed;
+        batteryPercent.Text=reading.Percentage is int value?value+"%":"—";batteryPercent.Visibility=Prefs.AppBarBatteryPercentage?Visibility.Visible:Visibility.Collapsed;
+        string description=(reading.Percentage is int level?level+"% battery":"Battery level unavailable")+(reading.Charging?" · Charging":reading.PluggedIn?" · Plugged in":"");battery.ToolTip=description;System.Windows.Automation.AutomationProperties.SetName(battery,description);
+    }
+    internal void RefreshContent(){UpdateAppearance();UpdateClock();UpdateBattery();ApplicationChanged();AudioChanged();MediaChanged();NetworkChanged();BluetoothChanged();}
 }

@@ -44,7 +44,7 @@ internal sealed class ActiveApplication:IDisposable
     {
         Refreshes++;
         var foreground=Native.GetForegroundWindow();GetWindowThreadProcessId(foreground,out uint pid);
-        if(pid==Environment.ProcessId)return; // Keep the external target while operating the AppBar.
+        if(pid==Environment.ProcessId){if(Current!=null&&!IsWindow(Current.Handle)){Current=null;Changed?.Invoke();}return;} // Preserve a live external target while operating the AppBar.
         var next=Read(foreground);
         if(next!=Current){Current=next;Changed?.Invoke();}
     }
