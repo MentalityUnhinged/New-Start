@@ -11,7 +11,7 @@ New Start is an experimental native Windows 11 dock and custom Start menu, built
 ## Features
 
 - Transparent dock with a white hollow-circle Start button, running indicators and separate pinned/running application sections.
-- Optional macOS-style glass dock background, off by default, following Light/Dark/System and the existing transparency/blur sliders. See [appearance details](docs/DOCK-BACKGROUND.md).
+- Optional macOS-style glass dock background, off by default, with independent colour, transparency and blur settings. See [appearance details](docs/DOCK-BACKGROUND.md).
 - Top, left or bottom placement. Bottom centre is the default for a new installation.
 - Left/centre/right alignment on horizontal edges; top/centre/bottom alignment on the left edge.
 - Start opens below a top dock, above a bottom dock, or beside a left dock. Top-centre and bottom-centre Start are centred horizontally on the screen; left-centre Start is vertically centred on the dock. Other layouts follow the Start button and stay within the work area.
@@ -24,6 +24,7 @@ New Start is an experimental native Windows 11 dock and custom Start menu, built
 - Light/Dark/System appearance, adjustable menu transparency and blur, optional clock, system controls, Task View and Show Desktop, plus the Windows Recycle Bin with live empty/full icons and an Empty action using Windows confirmation.
 - Account display name/avatar and standard folder/settings shortcuts, resolved locally at runtime.
 - Optional [Adaptive AppBar](docs/ADAPTIVE-APPBAR.md): per-display resting reservation, attached adaptive controls, media sessions/artwork, native volume/mute, Wi-Fi discovery/profiles, Bluetooth radio/paired-device state, clock/calendar and active-window controls. Shared colour theme with separate AppBar blur/transparency sliders.
+- [Application context and colour](docs/CONTEXT-AND-COLOUR.md): packaged/Win32 window identity, bounded accessibility actions, optional application adapters, independent Dock/AppBar custom colours and wallpaper-derived palettes.
 - Experimental standard-frame borderless management, off by default, with per-app exclusions, original-style journal, independent recovery helper and startup/manual recovery.
 
 ## Screenshots

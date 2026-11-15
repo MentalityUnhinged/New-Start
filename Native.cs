@@ -25,7 +25,7 @@ internal static class Native
     [DllImport("user32.dll")] internal static extern bool IsIconic(IntPtr hwnd);
     [DllImport("user32.dll")] internal static extern bool ShowWindowAsync(IntPtr hwnd,int command);
     [DllImport("user32.dll",SetLastError=true)]static extern bool PostMessage(IntPtr hwnd,uint message,IntPtr wParam,IntPtr lParam);
-    internal static void CloseWindow(IntPtr hwnd)=>PostMessage(hwnd,0x0112,new IntPtr(0xF060),IntPtr.Zero);
+    internal static bool CloseWindow(IntPtr hwnd)=>PostMessage(hwnd,0x0112,new IntPtr(0xF060),IntPtr.Zero);
     internal record TaskWindow(IntPtr Handle,string Title,string Path);
     internal static List<TaskWindow> Windows()
     {
@@ -38,7 +38,9 @@ internal static class Native
             if(DwmGetWindowAttribute(h,14,out int cloaked,4)==0&&cloaked!=0) return true;
             var title=new StringBuilder(512); GetWindowText(h,title,512); if(title.Length==0) return true;
             GetWindowThreadProcessId(h,out uint pid); if(pid==Environment.ProcessId) return true;
-            try { using var p=Process.GetProcessById((int)pid); var path=p.MainModule?.FileName; if(path!=null) list.Add(new(h,title.ToString(),path)); } catch { /* Protected processes remain accessible in Explorer. */ }
+            var identity=ApplicationIdentity.ProcessInfo(pid);string path=identity.Path;
+            if(className.ToString()=="ApplicationFrameWindow"&&ActiveApplication.Read(h) is {} frame)path=ApplicationIdentity.Enrich(frame).Path;
+            if(path.Length>0)list.Add(new(h,title.ToString(),path));
             return true;
         },IntPtr.Zero); return list;
     }

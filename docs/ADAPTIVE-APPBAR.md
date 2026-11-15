@@ -2,7 +2,7 @@
 
 Enable **Adaptive AppBar** in New Start settings. New installations keep it off. It creates a top bar on every display, or only the primary display when configured. The clock is centred on the display independently of the left/right controls. The Start circle moves out of the dock and opens Start below the selected display's bar. While enabled, the dock supports Bottom and Left; enabling from Top temporarily selects Bottom/Centre. Disabling restores the remembered edge/alignment. An AppBar clock suppresses the always-visible dock clock without deleting its setting.
 
-The bar follows New Start's shared Light/Dark/System theme and dock material palette. **AppBar transparency** and **AppBar blur** have separate whole-number sliders. Their initial values come from the existing appearance preferences, then remain independent. Both resting and expanded surfaces use these values. Zero blur hides the native companion surface and detaches its visual tree; transparency controls tint opacity. Windows high contrast/transparency policy still takes precedence.
+The bar follows New Start's shared Light/Dark/System theme, with independent Dock and AppBar colour sources. **AppBar transparency** and **AppBar blur** have separate whole-number sliders in Appearance. Their initial values come from the existing appearance preferences, then remain independent. Both resting and expanded surfaces use these values. Zero blur hides the native companion surface and detaches its visual tree; transparency controls tint opacity. Windows high contrast/transparency policy still takes precedence.
 
 ## Hosting and interaction
 

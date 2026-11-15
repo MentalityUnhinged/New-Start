@@ -12,3 +12,5 @@
 Adaptive AppBar integrates native media/Core Audio/WLAN/Bluetooth services. Permissions, Bluetooth profile limitations, the isolated private audio-output compatibility adapter and the conservative standard-frame caption subsystem are documented in [its API and recovery boundaries](ADAPTIVE-APPBAR.md). Caption restoration journals are written before mutation and recovered by an independent helper/startup path; arbitrary custom title bars are not supported.
 
 No administrator access, Explorer injection, taskbar hiding, or complete shell-parity claim is part of this preview. Windows Start/taskbar pin databases remain read-only.
+
+Application identity, accessibility action discovery, optional Chrome/ChatGPT adapters and wallpaper colour boundaries are detailed in [Context and colour](CONTEXT-AND-COLOUR.md). UIPI/secure desktop restrictions are respected; incomplete providers yield fewer actions. No guessed shortcuts, private application endpoints, extension installs or credentials are introduced.

@@ -20,3 +20,7 @@ Pins/
 .env
 .env.*
 !.env.example
+
+palettes/
+fixture-*.txt
+palette-fixture-*.png

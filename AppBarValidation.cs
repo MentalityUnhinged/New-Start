@@ -13,6 +13,7 @@ public sealed partial class DockWindow
     {
         suppressSettingsPersistence=true;
         var saved=(prefs.AppBarEnabled,prefs.AppBarAllMonitors,prefs.BorderlessWindows,prefs.Edge,prefs.Alignment,prefs.AppBarAnimations,prefs.AppBarTransparency,prefs.AppBarBlur,prefs.Theme,prefs.AppBarMediaHover);
+        var savedColour=(prefs.AppBarColourSource,prefs.AppBarColour);
         var checks=new Dictionary<string,bool>();var details=new List<object>();
         var baseline=DesktopDisplays.All().ToDictionary(display=>display.Name,display=>DesktopDisplays.Work(display.Handle));
         try
@@ -49,9 +50,17 @@ public sealed partial class DockWindow
                 double menuTransparency=prefs.StartTransparency,menuBlur=prefs.MenuBlur;
                 foreach(int theme in new[]{1,2})foreach(double transparency in new[]{0d,1d})foreach(double blur in new[]{0d,20d})
                 {
-                    prefs.Theme=theme;prefs.AppBarTransparency=transparency;prefs.AppBarBlur=blur;bar.UpdateAppearance();
-                    bool effects=NativeBackdrop.TransparencyAllowed();checks[key+$"Theme{theme}T{transparency}B{blur}"]=bar.BlurVisible==(effects&&blur>0)&&Math.Abs(bar.MaterialOpacity-(effects?1-transparency:1))<.001;
+                    prefs.AppBarColourSource=0;prefs.Theme=theme;prefs.AppBarTransparency=transparency;prefs.AppBarBlur=blur;bar.UpdateAppearance();
+                    bool effects=NativeBackdrop.TransparencyAllowed();checks[key+$"Theme{theme}T{transparency}B{blur}"]=bar.BlurVisible==(effects&&blur>0&&transparency>0&&transparency<1)&&Math.Abs(bar.MaterialOpacity-(1-transparency))<.001;
+                    checks[key+$"PureSystemColour{theme}T{transparency}B{blur}"]=bar.MaterialColour==(theme==1?System.Windows.Media.Colors.White:System.Windows.Media.Colors.Black);
                 }
+                prefs.AppBarColourSource=1;bar.Expand(AppBarSection.Clock);await Task.Delay(300);
+                foreach(string colour in new[]{"#7A36CE","#FFFFFF","#000000"})foreach(double transparency in new[]{0d,.5,1d})
+                {
+                    prefs.AppBarColour=colour;prefs.AppBarTransparency=transparency;bar.UpdateAppearance();SurfaceAppearance.TryHex(colour,out var expected);
+                    checks[key+$"Custom{colour}T{transparency}"]=bar.MaterialColour==expected&&Math.Abs(bar.MaterialOpacity-(1-transparency))<.001&&bar.HasContinuousMaterial;
+                }
+                bar.Collapse(false);(prefs.AppBarColourSource,prefs.AppBarColour)=savedColour;
                 checks[key+"IndependentAppearance"]=prefs.StartTransparency==menuTransparency&&prefs.MenuBlur==menuBlur;
                 bar.Expand(AppBarSection.Start);await Task.Delay(350);
                 checks[key+"StartSharesAppBarSurface"]=bar.Section==AppBarSection.Start&&bar.HasContinuousMaterial&&startMenu?.IsVisible==false;bar.Collapse(false);
@@ -81,11 +90,12 @@ public sealed partial class DockWindow
         finally
         {
             appBars?.Dispose();appBars=null;(prefs.AppBarEnabled,prefs.AppBarAllMonitors,prefs.BorderlessWindows,prefs.Edge,prefs.Alignment,prefs.AppBarAnimations,prefs.AppBarTransparency,prefs.AppBarBlur,prefs.Theme,prefs.AppBarMediaHover)=saved;
+            (prefs.AppBarColourSource,prefs.AppBarColour)=savedColour;
             UpdateAppBars();Refresh(true);UpdateLayout();Position();
             File.WriteAllText(Path.Combine(Preferences.Folder,"appbar-verification.json"),JsonSerializer.Serialize(new{Checks=checks,Displays=details},new JsonSerializerOptions{WriteIndented=true}));Close();suppressSettingsPersistence=false;
         }
     }
     static bool Same(Native.Rect a,Native.Rect b)=>a.Left==b.Left&&a.Top==b.Top&&a.Right==b.Right&&a.Bottom==b.Bottom;
     static int DisplayLeft(AdaptiveAppBarWindow bar)=>bar.Display.Bounds.Left;
-    internal void PreviewAppBar(){prefs.AppBarEnabled=true;prefs.BorderlessWindows=false;prefs.AppBarTransparency=.35;prefs.AppBarBlur=16;if(prefs.Edge==DockEdge.Top)prefs.Edge=DockEdge.Bottom;UpdateAppBars();if(appBars!=null)foreach(var bar in appBars.Windows){bar.ShowInTaskbar=true;bar.Testing=false;bar.RefreshContent();}Refresh(true);Position();}
+    internal void PreviewAppBar(){prefs.AppBarEnabled=true;prefs.BorderlessWindows=false;if(prefs.Edge==DockEdge.Top)prefs.Edge=DockEdge.Bottom;UpdateAppBars();if(appBars!=null)foreach(var bar in appBars.Windows){bar.ShowInTaskbar=true;bar.Testing=false;bar.RefreshContent();}Refresh(true);Position();}
 }

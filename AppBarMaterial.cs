@@ -37,14 +37,15 @@ internal sealed class AppBarMaterial:IDisposable
     internal Path Surface {get;}=new(){IsHitTestVisible=false,StrokeThickness=1,Stretch=Stretch.None,HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Top};
     internal bool NativeVisible=>handle!=IntPtr.Zero&&IsBackdropVisible(handle);
     internal double TintOpacity=>Surface.Fill?.Opacity??0;
+    internal Color? TintColour=>(Surface.Fill as SolidColorBrush)?.Color;
     internal bool NativeContains(Point point)=>handle!=IntPtr.Zero&&BackdropRegionContains(handle,(float)point.X,(float)point.Y);
     IntPtr handle;
-    (AppBarOutline Shape,double X,double Y,double Dpi,bool Visible,bool Dark,bool High,bool Effects,double Transparency,double Blur)? previous;
-    (bool Dark,bool High,bool Native,double Transparency)? palette;
+    (AppBarOutline Shape,double X,double Y,double Dpi,bool Visible,bool Dark,bool High,bool Effects,double Transparency,double Blur,Color? Colour)? previous;
+    (bool Dark,bool High,bool Native,double Transparency,Color? Colour)? palette;
     internal void Update(Window owner,Preferences prefs,AppBarOutline shape)
     {
-        bool effects=NativeBackdrop.TransparencyAllowed();
-        var key=(shape,owner.Left,owner.Top,VisualTreeHelper.GetDpi(owner).DpiScaleX,owner.IsVisible,Appearance.IsDark(prefs.Theme),SystemParameters.HighContrast,effects,prefs.StartTransparency,prefs.MenuBlur);
+        bool effects=NativeBackdrop.TransparencyAllowed()&&!SystemParameters.HighContrast&&prefs.StartTransparency>0&&prefs.StartTransparency<1;
+        var key=(shape,owner.Left,owner.Top,VisualTreeHelper.GetDpi(owner).DpiScaleX,owner.IsVisible,Appearance.IsDark(prefs.Theme),SystemParameters.HighContrast,effects,prefs.StartTransparency,prefs.MenuBlur,prefs.SurfaceColour);
         if(previous==key&&(prefs.MenuBlur==0||!effects||NativeVisible))return;
         Surface.Data=shape.Geometry();bool native=effects;
         try
@@ -54,7 +55,7 @@ internal sealed class AppBarMaterial:IDisposable
         }
         catch(DllNotFoundException){native=false;}catch(EntryPointNotFoundException){native=false;}
         if(!native&&handle!=IntPtr.Zero)UpdateBackdrop(handle,0,false);
-        var colors=(Appearance.IsDark(prefs.Theme),SystemParameters.HighContrast,native,prefs.StartTransparency);
+        var colors=(Appearance.IsDark(prefs.Theme),SystemParameters.HighContrast,native,prefs.StartTransparency,prefs.SurfaceColour);
         if(palette!=colors){var material=DockGlass.Material(prefs,native);Surface.Fill=material.Tint;Surface.Stroke=material.Rim;palette=colors;}
         previous=key;
     }

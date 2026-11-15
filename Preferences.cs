@@ -14,6 +14,17 @@ public sealed class Preferences
     public double StartTransparency { get; set; } = .8;
     public double MenuBlur { get; set; } = 16;
     public bool DockBackground {get;set;}=false;
+    public double? DockTransparency {get;set;}
+    public double? DockBlur {get;set;}
+    public int DockColourSource {get;set;} // System, Custom, Wallpaper automatic, Wallpaper palette
+    public int AppBarColourSource {get;set;}
+    public string DockColour {get;set;}="#000000";
+    public string AppBarColour {get;set;}="#000000";
+    public int DockWallpaperStrategy {get;set;} // Dominant, accent
+    public int AppBarWallpaperStrategy {get;set;}
+    public string DockWallpaperFallback {get;set;}="#000000";
+    public string AppBarWallpaperFallback {get;set;}="#000000";
+    internal System.Windows.Media.Color? SurfaceColour {get;set;}
     public bool AppBarEnabled {get;set;}
     public double? AppBarTransparency {get;set;}
     public double? AppBarBlur {get;set;}
@@ -73,6 +84,12 @@ public sealed class Preferences
         static List<string> Paths(List<string>? values)=>(values??new()).Where(value=>!string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         Magnification=Number(Magnification,1,1.75,1.25,2);IconSize=Number(IconSize,16,64,36);
         Theme=Math.Clamp(Theme,0,2);Clock=Math.Clamp(Clock,0,2);
+        StartTransparency=Number(StartTransparency,0,1,.8,2);MenuBlur=Number(MenuBlur,0,60,16,2);
+        DockColourSource=Math.Clamp(DockColourSource,0,3);AppBarColourSource=Math.Clamp(AppBarColourSource,0,3);
+        DockWallpaperStrategy=Math.Clamp(DockWallpaperStrategy,0,1);AppBarWallpaperStrategy=Math.Clamp(AppBarWallpaperStrategy,0,1);
+        DockColour=SurfaceAppearance.HexOrDefault(DockColour);AppBarColour=SurfaceAppearance.HexOrDefault(AppBarColour);
+        DockWallpaperFallback=SurfaceAppearance.HexOrDefault(DockWallpaperFallback);AppBarWallpaperFallback=SurfaceAppearance.HexOrDefault(AppBarWallpaperFallback);
+        DockTransparency=Number(DockTransparency??StartTransparency,0,1,.8,2);DockBlur=Number(DockBlur??MenuBlur,0,60,16,2);
         AppBarAnimationMilliseconds=Math.Clamp(AppBarAnimationMilliseconds,0,600);AppBarClockFormat=Math.Clamp(AppBarClockFormat,0,2);
         if(AppBarTransparency.HasValue)AppBarTransparency=Number(AppBarTransparency.Value,0,1,StartTransparency,2);
         if(AppBarBlur.HasValue)AppBarBlur=Number(AppBarBlur.Value,0,60,MenuBlur,2);

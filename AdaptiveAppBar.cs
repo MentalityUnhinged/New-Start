@@ -26,10 +26,11 @@ internal sealed class AdaptiveAppBars:IDisposable
     internal readonly AppBarMedia Media;
     internal readonly AppBarNetwork Network;
     internal readonly AppBarBluetooth Bluetooth;
+    internal readonly ApplicationCapabilities Capabilities;
     internal IEnumerable<AdaptiveAppBarWindow> Windows=>bars.Values;
     internal AdaptiveAppBars(DockWindow host,Preferences prefs)
     {
-        dock=host;Preferences=prefs;Applications=new(host.Dispatcher);Borderless=new(prefs,Applications);Audio=new(host.Dispatcher);Media=new(host.Dispatcher);Network=new(host.Dispatcher);Bluetooth=new(host.Dispatcher);
+        dock=host;Preferences=prefs;Applications=new(host.Dispatcher);Borderless=new(prefs,Applications);Audio=new(host.Dispatcher);Media=new(host.Dispatcher);Network=new(host.Dispatcher);Bluetooth=new(host.Dispatcher);Capabilities=new(Applications,Media,host.Dispatcher);
         SystemEvents.DisplaySettingsChanged+=DisplaysChanged;SystemEvents.UserPreferenceChanged+=UserPreferenceChanged;
         try{Reconcile();Borderless.Update();}catch{Dispose();throw;}
     }
@@ -64,7 +65,7 @@ internal sealed class AdaptiveAppBars:IDisposable
     public void Dispose()
     {
         if(disposed)return;disposed=true;SystemEvents.DisplaySettingsChanged-=DisplaysChanged;SystemEvents.UserPreferenceChanged-=UserPreferenceChanged;
-        foreach(var bar in bars.Values.ToArray())bar.Close();bars.Clear();Borderless.Dispose();Applications.Dispose();Audio.Dispose();Media.Dispose();Network.Dispose();Bluetooth.Dispose();
+        foreach(var bar in bars.Values.ToArray())bar.Close();bars.Clear();Capabilities.Dispose();Borderless.Dispose();Applications.Dispose();Audio.Dispose();Media.Dispose();Network.Dispose();Bluetooth.Dispose();
     }
 }
 
@@ -92,6 +93,7 @@ internal sealed class AdaptiveAppBarWindow:Window
     readonly List<IntPtr> powerNotifications=new();
     Button clock=null!,media=null!,audio=null!,network=null!,bluetooth=null!;
     DockReservation? reservation;HwndSource? source;AppBarSection current;double expandedWidth=420;bool closing,repositioning;int appIconVersion;
+    (IntPtr Window,uint Process,long Started,string Target)? iconIdentity;
     bool? dark;bool highContrast;
     int animationGeneration;
     double targetExtra=1;
@@ -100,7 +102,7 @@ internal sealed class AdaptiveAppBarWindow:Window
     Slider? volumeSlider;Button? muteButton;TextBlock? audioStatus;bool syncingVolume;
     TextBlock? networkStatus;
     DateTime calendarMonth=new(DateTime.Today.Year,DateTime.Today.Month,1),calendarSelection=DateTime.Today;
-    bool hoverExpansion,focusStartPending,settingsFitQueued;Action? releaseContent;
+    bool hoverExpansion,focusStartPending,settingsFitQueued,showAllActions;Action? releaseContent;
     internal AppBarSection Section=>current;
     internal bool Testing {get;set;}
     internal double ReservedHeight=>RestHeight;
@@ -108,6 +110,7 @@ internal sealed class AdaptiveAppBarWindow:Window
     internal long Repositions {get;private set;}
     internal bool BlurVisible=>material.NativeVisible;
     internal double MaterialOpacity=>material.TintOpacity;
+    internal Color? MaterialColour=>material.TintColour;
     internal bool HasContinuousMaterial
     {
         get
@@ -154,6 +157,7 @@ internal sealed class AdaptiveAppBarWindow:Window
             if(foreground!=IntPtr.Zero&&foreground!=own&&!IsOwnedBy(foreground,own))Collapse();
         }),DispatcherPriority.Input);
         host.Applications.Changed+=ApplicationChanged;host.Audio.Changed+=AudioChanged;host.Media.Changed+=MediaChanged;host.Network.Changed+=NetworkChanged;host.Bluetooth.Changed+=BluetoothChanged;
+        host.Capabilities.Changed+=CapabilitiesChanged;
         Loaded+=(_,_)=>{
             source=HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);source?.AddHook(Hook);
             foreach(var setting in AppBarBattery.Notifications){var id=setting;var token=AppBarBattery.RegisterPowerSettingNotification(source!.Handle,ref id,0);if(token!=IntPtr.Zero)powerNotifications.Add(token);}UpdateBattery();
@@ -164,6 +168,7 @@ internal sealed class AdaptiveAppBarWindow:Window
             closing=true;ClearBody();clockTimer.Stop();leaveTimer.Stop();hoverTimer.Stop();source?.RemoveHook(Hook);reservation?.Dispose();material.Dispose();
             foreach(var token in powerNotifications)AppBarBattery.UnregisterPowerSettingNotification(token);powerNotifications.Clear();
             host.Applications.Changed-=ApplicationChanged;host.Audio.Changed-=AudioChanged;host.Media.Changed-=MediaChanged;host.Network.Changed-=NetworkChanged;host.Bluetooth.Changed-=BluetoothChanged;
+            host.Capabilities.Changed-=CapabilitiesChanged;
         };
     }
     [DllImport("user32.dll")]static extern IntPtr GetWindow(IntPtr window,uint command);
@@ -201,9 +206,12 @@ internal sealed class AdaptiveAppBarWindow:Window
     }
     internal void UpdateAppearance()
     {
-        if(closing)return;bool next=Appearance.IsDark(Prefs.Theme);
+        if(closing)return;bool next=SurfaceAppearance.WhiteInk(SurfaceAppearance.Effective(Prefs,true,Display.Name));
         if(dark!=next||highContrast!=SystemParameters.HighContrast){dark=next;highContrast=SystemParameters.HighContrast;Appearance.Apply(this,next);Background=Brushes.Transparent;}
+        Foreground=SurfaceAppearance.Ink(Prefs,true,Display.Name);Resources["Text"]=Foreground;
         surfacePrefs.Theme=Prefs.Theme;surfacePrefs.MenuBlur=Prefs.AppBarBlur??Prefs.MenuBlur;surfacePrefs.StartTransparency=Prefs.AppBarTransparency??Prefs.StartTransparency;
+        surfacePrefs.SurfaceColour=SurfaceAppearance.Background(Prefs,true,Display.Name);
+        var hit=surfacePrefs.SurfaceColour.Value;header.Background=new SolidColorBrush(Color.FromArgb(1,hit.R,hit.G,hit.B));bodyHit.Background=header.Background;
         UpdateSurface();
     }
     void UpdateSurface()
@@ -258,7 +266,7 @@ internal sealed class AdaptiveAppBarWindow:Window
     void FitExpansion()
     {
         if(current==AppBarSection.None)return;
-        double limit=current switch{AppBarSection.Start=>740,AppBarSection.Settings=>620,AppBarSection.Media=>220,AppBarSection.Audio=>300,AppBarSection.Application=>180,_=>300};
+        double limit=current switch{AppBarSection.Start=>740,AppBarSection.Settings=>620,AppBarSection.Media=>220,AppBarSection.Audio=>300,AppBarSection.Application=>380,_=>300};
         body.Measure(new Size(expandedWidth,double.PositiveInfinity));double target=Math.Clamp(Math.Ceiling(body.DesiredSize.Height)+4,44,limit);
         double scale=VisualTreeHelper.GetDpi(this).DpiScaleY;double maximum=(Display.Bounds.Bottom-Display.Bounds.Top)/scale-RestHeight-24;
         double height=RestHeight+Math.Max(40,Math.Min(target,maximum));if(Math.Abs(Height-height)>.5)AnimateHeight(height);
@@ -329,7 +337,11 @@ internal sealed class AdaptiveAppBarWindow:Window
             case AppBarSection.Clock:
                 Text(calendarSelection.ToString("D",CultureInfo.CurrentCulture),14);BuildCalendar();break;
             case AppBarSection.Application:
-                var app=host.Applications.Current;Text(app?.Title??"Desktop",14);Text(host.Borderless.Feedback,12);
+                var app=host.Applications.Current;Text(app?.Name??"Desktop",14);Text(app?.Title??"",12);
+                var contextual=new WrapPanel();body.Children.Add(contextual);
+                foreach(var capability in host.Capabilities.Actions.OrderBy(action=>action.Method=="Window"?1:0).Take(showAllActions?32:8)){var selected=capability;Action(capability.Label,()=>_=host.Capabilities.Execute(selected),contextual);}
+                if(host.Capabilities.Actions.Count>8)Action(showAllActions?"Fewer actions":"More actions",()=>{showAllActions=!showAllActions;BuildBody();});
+                Text(host.Capabilities.Status,12);Action("Refresh available actions",()=>host.Capabilities.Refresh());Text(host.Borderless.Feedback,12);
                 if(app!=null)Action("Exclude this app from borderless management",()=>{if(!Prefs.BorderlessExclusions.Contains(app.Path,StringComparer.OrdinalIgnoreCase))Prefs.BorderlessExclusions.Add(app.Path);Prefs.Save();host.Borderless.Update();BuildBody();});break;
         }
         if(IsLoaded)FitExpansion();
@@ -376,11 +388,12 @@ internal sealed class AdaptiveAppBarWindow:Window
     void MediaChanged(){media.ToolTip=host.Media.Title;if(current==AppBarSection.Media)BuildBody();}
     void NetworkChanged(){network.ToolTip=host.Network.Status;if(networkStatus!=null)networkStatus.Text=host.Network.Status;if(current==AppBarSection.Network&&!body.IsKeyboardFocusWithin)BuildBody();}
     void BluetoothChanged(){bluetooth.ToolTip=host.Bluetooth.Status;bluetooth.Opacity=host.Bluetooth.Enabled?1:.55;if(current==AppBarSection.Bluetooth)BuildBody();}
+    void CapabilitiesChanged(){if(!closing&&current==AppBarSection.Application)BuildBody();}
     async void ApplicationChanged()
     {
-        var target=host.Applications.Current;application.Text=target==null?"Desktop":System.IO.Path.GetFileNameWithoutExtension(target.Path);application.ToolTip=target?.Title;windowControls.Children.Clear();
+        var target=host.Applications.Current;application.Text=target==null?"Desktop":target.Name.Length>0?target.Name:target.Title;application.ToolTip=target?.Title;windowControls.Children.Clear();
         bool sameMonitor=target!=null&&DesktopDisplays.MonitorFromWindow(target.Handle,2)==Display.Handle;
-        if(sameMonitor&&target is {Fullscreen:false})
+        if(sameMonitor&&target is {Fullscreen:false,Started:>0})
         {
             var saved=target;
             void Command(int command){if(host.Applications.ValidTarget(saved))Native.ShowWindowAsync(saved.Handle,command);}
@@ -388,8 +401,12 @@ internal sealed class AdaptiveAppBarWindow:Window
             if((saved.Style&0x10000)!=0)windowControls.Children.Add(Compact(saved.Maximized?"\uE923":"\uE922",saved.Maximized?"Restore active window":"Maximise active window",()=>Command(saved.Maximized?9:3),true));
             if((saved.Style&0x80000)!=0)windowControls.Children.Add(Compact("\uE8BB","Close active window",()=>{if(host.Applications.ValidTarget(saved))Native.CloseWindow(saved.Handle);},true));
         }
-        int version=++appIconVersion;applicationIcon.Source=null;
-        if(target!=null){var icon=await StartCatalog.Icon(target.Path);if(closing||version!=appIconVersion)return;applicationIcon.Source=icon;}
+        var nextIcon=target==null?((IntPtr,uint,long,string)?)null:(target.Handle,target.ProcessId,target.Started,target.IconTarget);
+        if(iconIdentity!=nextIcon)
+        {
+            iconIdentity=nextIcon;int version=++appIconVersion;applicationIcon.Source=null;
+            if(target!=null){var icon=await ApplicationIdentity.Icon(target);if(closing||version!=appIconVersion)return;applicationIcon.Source=icon;}
+        }
         if(current==AppBarSection.Application)BuildBody();
         if(target?.Fullscreen==true&&sameMonitor){Collapse(false);Topmost=false;}else Topmost=true;
     }

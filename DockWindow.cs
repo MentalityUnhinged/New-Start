@@ -149,7 +149,9 @@ public sealed partial class DockWindow : Window
         barMenu.Items.Add(new Separator());Add(barMenu,"New Start settings",Settings);
         dockSurface.ContextMenu=barMenu;
         AllowDrop=true;DragOver+=DockDragOver;Drop+=DockDrop;
+        WallpaperPalette? wallpaper=null;
         Loaded+=(_,_)=>{
+            wallpaper=new WallpaperPalette(Dispatcher);wallpaper.Changed+=WallpaperChanged;
             TaskbarPins.Refresh();
             RecycleBinIcon.Changed+=RecycleChanged;recycleWatcher=new RecycleBinWatcher(this);RecycleBinIcon.Refresh();
             Refresh(); Position();
@@ -165,7 +167,7 @@ public sealed partial class DockWindow : Window
         // the edge-relative position after that notification has settled.
         LocationChanged+=(_,_)=>QueuePosition();
         timer.Tick+=(_,_)=>{ Refresh(); Position(); clock.Text=DateTime.Now.ToString(prefs.Edge==DockEdge.Left?"HH\nmm":"t"); _=StartCatalog.Refresh();RecycleBinIcon.Refresh();TaskbarPins.Refresh(); };
-        Closed+=(_,_)=>{ timer.Stop(); tray.IsOpen=false;appBars?.Dispose();appBars=null; startMenu?.Close();dockGlass.Dispose();recycleWatcher?.Dispose();RecycleBinIcon.Changed-=RecycleChanged;reservation?.Dispose(); };
+        Closed+=(_,_)=>{ if(wallpaper!=null){wallpaper.Changed-=WallpaperChanged;wallpaper.Dispose();}timer.Stop(); tray.IsOpen=false;appBars?.Dispose();appBars=null; startMenu?.Close();dockGlass.Dispose();recycleWatcher?.Dispose();RecycleBinIcon.Changed-=RecycleChanged;reservation?.Dispose(); };
         PreviewKeyDown+=(_,e)=>{if(e.Key==Key.Escape&&!dragging){controlsKeyboardDismiss=tray.IsOpen;tray.IsOpen=false;controlsDismissedByIcon=false;startMenu?.Dismiss();e.Handled=true;}};
     }
     void RecycleChanged()
@@ -176,6 +178,7 @@ public sealed partial class DockWindow : Window
             if(emptyRecycleItem!=null)emptyRecycleItem.IsEnabled=!emptyingRecycleBin&&RecycleBinIcon.HasItems!=false;
         }));
     }
+    void WallpaperChanged(){if(!IsLoaded)return;UpdateDockBackground();appBars?.Refresh();}
     void QueuePosition()
     {
         if(positionQueued||!IsLoaded||Dispatcher.HasShutdownStarted)return;positionQueued=true;
@@ -226,10 +229,11 @@ public sealed partial class DockWindow : Window
     internal async System.Threading.Tasks.Task VerifyDockGlass()
     {
         var checks=new Dictionary<string,bool>{{"DefaultOff",!new Preferences().DockBackground}};
-        var original=(prefs.DockBackground,prefs.Edge,prefs.Alignment,prefs.Theme,prefs.StartTransparency,prefs.MenuBlur,prefs.ReserveDockSpace);
+        var original=(prefs.DockBackground,prefs.Edge,prefs.Alignment,prefs.Theme,prefs.DockTransparency,prefs.DockBlur,prefs.ReserveDockSpace);
+        int originalColourSource=prefs.DockColourSource;
         try
         {
-            prefs.DockBackground=true;prefs.ReserveDockSpace=true;prefs.Alignment=DockAlignment.Centre;
+            prefs.DockBackground=true;prefs.ReserveDockSpace=true;prefs.Alignment=DockAlignment.Centre;prefs.DockColourSource=0;
             foreach(var edge in Enum.GetValues<DockEdge>())foreach(int theme in new[]{1,2})
             {
                 prefs.Edge=edge;prefs.Theme=theme;Refresh(true);UpdateLayout();Position();await System.Threading.Tasks.Task.Delay(150);UpdateLayout();Position();
@@ -241,16 +245,18 @@ public sealed partial class DockWindow : Window
                 checks[key+"Spacing"]=Math.Abs(inner-8)<=pixel&&Math.Abs(screen-8)<=pixel;
                 foreach(double transparency in new[]{0d,.75,1d})foreach(double blur in new[]{0d,20d})
                 {
-                    prefs.StartTransparency=transparency;prefs.MenuBlur=blur;UpdateDockBackground();
+                    prefs.DockTransparency=transparency;prefs.DockBlur=blur;UpdateDockBackground();
                     bool effects=NativeBackdrop.TransparencyAllowed();
-                    checks[$"{key}T{transparency}B{blur}"]=dockGlass.Surface.IsVisible&&Math.Abs(dockGlass.TintOpacity-(effects?1-transparency:1))<.00001&&dockGlass.NativeVisible==(effects&&blur>0);
+                    checks[$"{key}T{transparency}B{blur}"]=dockGlass.Surface.IsVisible&&Math.Abs(dockGlass.TintOpacity-(1-transparency))<.00001&&dockGlass.NativeVisible==(effects&&blur>0&&transparency>0&&transparency<1);
+                    checks[$"{key}PureColourT{transparency}B{blur}"]=dockGlass.TintColour==(theme==1?Colors.White:Colors.Black);
                 }
             }
             prefs.DockBackground=false;Position();checks["DisabledHasNoSurfaceOrBlur"]=dockGlass.Surface.Visibility==Visibility.Collapsed&&!dockGlass.NativeVisible;
         }
         finally
         {
-            (prefs.DockBackground,prefs.Edge,prefs.Alignment,prefs.Theme,prefs.StartTransparency,prefs.MenuBlur,prefs.ReserveDockSpace)=original;
+            (prefs.DockBackground,prefs.Edge,prefs.Alignment,prefs.Theme,prefs.DockTransparency,prefs.DockBlur,prefs.ReserveDockSpace)=original;
+            prefs.DockColourSource=originalColourSource;
             Refresh(true);UpdateLayout();Position();
         }
         File.WriteAllText(System.IO.Path.Combine(Preferences.Folder,"dock-glass-verification.json"),System.Text.Json.JsonSerializer.Serialize(checks,new System.Text.Json.JsonSerializerOptions{WriteIndented=true}));
@@ -294,7 +300,8 @@ public sealed partial class DockWindow : Window
     void UpdateDockBackground()
     {
         if(!IsLoaded)return;
-        dockInk=DockGlass.Ink(prefs);var colour=((SolidColorBrush)dockInk).Color;
+        string? monitor=DockMonitorName();
+        dockInk=DockGlass.Ink(prefs,monitor);var colour=((SolidColorBrush)dockInk).Color;
         if(lastInk!=colour){foreach(var item in row.Children.OfType<DependencyObject>())TintDockItem(item,dockInk);lastInk=colour;}
         Rect bounds=Rect.Empty;
         if(prefs.DockBackground&&row.Children.OfType<Button>().FirstOrDefault() is {IsLoaded:true} first&&row.Children.OfType<Button>().LastOrDefault() is Button last)
@@ -308,6 +315,7 @@ public sealed partial class DockWindow : Window
         }
         dockGlass.Update(this,prefs,bounds);
     }
+    string? DockMonitorName()=>DesktopDisplays.All().FirstOrDefault(display=>display.Handle==DesktopDisplays.MonitorFromWindow(new System.Windows.Interop.WindowInteropHelper(this).Handle,2))?.Name;
     static void TintDockItem(DependencyObject item,Brush ink)
     {
         if(item is Shape shape){if(shape.Stroke!=null)shape.Stroke=ink;if(shape.Fill!=null)shape.Fill=ink;}
@@ -367,7 +375,7 @@ public sealed partial class DockWindow : Window
     {
         if(dragging||(!force&&(tray.IsOpen||row.Children.OfType<Button>().Any(b=>b.ContextMenu?.IsOpen==true))))return;
         windows=Native.Windows();
-        dockInk=DockGlass.Ink(prefs);
+        dockInk=DockGlass.Ink(prefs,DockMonitorName());
         var effectivePins=dockPins.All();
         string next=string.Join("|",windows.Select(w=>$"{w.Handle}:{w.Path}:{w.Title}"))+string.Join("|",effectivePins);
         if(!force&&next==signature)return; signature=next; row.Children.Clear();pinButtons.Clear();
@@ -633,9 +641,14 @@ public sealed partial class DockWindow : Window
         themes.SelectionChanged+=(_,_)=>{prefs.Theme=themes.SelectedIndex;ApplyTheme();};panel.Children.Add(themes);
         Section("Dock");Slider("Icon size (px)",prefs.IconSize,16,64,v=>{prefs.IconSize=Math.Round(v);Refresh(true);});
         Toggle("macOS-style dock background",prefs.DockBackground,v=>{prefs.DockBackground=v;Refresh(true);Position();});
-        panel.Children.Add(new TextBlock{Text="Uses transparency and blur from Appearance.",Opacity=.65,FontSize=12,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,8)});
+        panel.Children.Add(new TextBlock{Text="Background colour, transparency and blur are independent in Appearance.",Opacity=.65,FontSize=12,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,8)});
         Toggle("Reserve space for dock",prefs.ReserveDockSpace,v=>{prefs.ReserveDockSpace=v;Position();});
-        Section("Appearance");Slider("Menu transparency (%)",prefs.StartTransparency*100,0,100,v=>{prefs.StartTransparency=v/100;startMenu?.UpdateAppearance();ApplyTheme();});
+        Section("Appearance");
+        string? AppearanceMonitor()=>DesktopDisplays.All().FirstOrDefault(display=>display.Handle==DesktopDisplays.MonitorFromWindow(new System.Windows.Interop.WindowInteropHelper(embedded?dialog:this).Handle,2))?.Name;
+        void BackgroundChanged(){Save();ApplyTheme();}
+        panel.Children.Add(BackgroundSettings.Create(prefs,false,AppearanceMonitor,BackgroundChanged));
+        panel.Children.Add(BackgroundSettings.Create(prefs,true,AppearanceMonitor,BackgroundChanged));
+        Slider("Start / standalone menu transparency (%)",prefs.StartTransparency*100,0,100,v=>{prefs.StartTransparency=v/100;startMenu?.UpdateAppearance();ApplyTheme();});
         Slider("Menu blur (%)",prefs.MenuBlur/60*100,0,100,v=>{prefs.MenuBlur=v*.6;startMenu?.UpdateAppearance();ApplyTheme();});
         Section("Dock");Toggle("Show system controls",prefs.ShowSystemControls,v=>{prefs.ShowSystemControls=v;tray.IsOpen=false;Refresh(true);});
         Toggle("Show Task View",prefs.ShowTaskView,v=>{prefs.ShowTaskView=v;Refresh(true);});
@@ -644,8 +657,7 @@ public sealed partial class DockWindow : Window
         var restorePins=new Button{Content="Restore hidden Windows taskbar pins",Margin=new Thickness(0,4,0,8)};restorePins.Click+=(_,_)=>{prefs.HiddenTaskbarPins.Clear();Refresh(true);};panel.Children.Add(restorePins);
         Section("Adaptive AppBar · Beta");
         Toggle("Enable Adaptive AppBar",prefs.AppBarEnabled,v=>{EnableAppBar(v);edges.SelectedIndex=(int)prefs.Edge;UpdateAlignments();});
-        Slider("AppBar transparency (%)",(prefs.AppBarTransparency??prefs.StartTransparency)*100,0,100,v=>{prefs.AppBarTransparency=v/100;appBars?.Refresh();});
-        Slider("AppBar blur (%)",(prefs.AppBarBlur??prefs.MenuBlur)/60*100,0,100,v=>{prefs.AppBarBlur=v*.6;appBars?.Refresh();});
+        panel.Children.Add(new TextBlock{Text="AppBar background colour, transparency and blur: Appearance.",TextWrapping=TextWrapping.Wrap,Opacity=.7,Margin=new Thickness(0,0,0,8)});
         Toggle("Show AppBar on every display",prefs.AppBarAllMonitors,v=>{prefs.AppBarAllMonitors=v;appBars?.Refresh(true);});
         Toggle("Expand media on hover",prefs.AppBarMediaHover,v=>prefs.AppBarMediaHover=v);
         Toggle("Animate AppBar expansion",prefs.AppBarAnimations,v=>prefs.AppBarAnimations=v);

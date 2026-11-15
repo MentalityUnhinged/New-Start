@@ -8,12 +8,27 @@ public static class Program
 {
     [STAThread] public static void Main(string[] args)
     {
+        if(args.Length==1&&args[0]=="--capability-worker"){CapabilityWorker.Run();return;}
+        if(args.Length==3&&args[0]=="--context-fixture"){ContextValidation.Fixture(args[1],args[2]=="slow");return;}
+        if(args.Length==1&&args[0]=="--verify-capability-inventory")
+        {
+            var validation=new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};validation.Startup+=async(_,_)=>{StartCatalog.Initialize();try{await ContextValidation.Inventory();validation.Shutdown();}catch{validation.Shutdown(1);}};validation.Run();return;
+        }
+        if(args.Length==1&&args[0]=="--verify-capability-core")
+        {
+            var validation=new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};validation.Startup+=async(_,_)=>{try{await ContextValidation.Core(validation.Dispatcher);validation.Shutdown();}catch{validation.Shutdown(1);}};validation.Run();return;
+        }
         if(args.Length==1&&args[0]=="--borderless-fixture"){BorderlessFixture.Run();return;}
         if(args.Length==2&&args[0]=="--borderless-crash-test"&&long.TryParse(args[1],out long fixture)){BorderlessFixture.CrashTest(new IntPtr(fixture));return;}
         if(args.Length==3&&args[0]=="--borderless-guardian"&&int.TryParse(args[1],out int parent)&&long.TryParse(args[2],out long started)){BorderlessManager.Guard(parent,started);return;}
         using var single = new Mutex(true, "NewStart.User." + Environment.UserName, out bool first);
         if (!first) return;
         BorderlessManager.Recover();
+        if(args.Length==1&&args[0]=="--verify-context-appearance")
+        {
+            var validation=new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};
+            validation.Startup+=async(_,_)=>{try{StartCatalog.Initialize();await ContextValidation.Run(validation.Dispatcher);validation.Shutdown();}catch{validation.Shutdown(1);}};validation.Run();return;
+        }
         if(Array.IndexOf(args,"--verify-pin-model")>=0){PinDragValidation.Run();return;}
         if(Array.IndexOf(args,"--verify-audit")>=0){var validationApp=new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};AuditValidation.Run();return;}
         try{Preferences.MigrateLegacy();}catch(System.IO.IOException){}catch(UnauthorizedAccessException){}
