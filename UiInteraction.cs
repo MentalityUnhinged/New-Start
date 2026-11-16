@@ -10,6 +10,7 @@ namespace NewStart;
 internal static class UiMetrics
 {
     internal const double Corner=8,Gap=6,Row=28;
+    internal static Size DockSlot(Preferences prefs){bool vertical=prefs.Edge==DockEdge.Left;return new(prefs.IconSize*1.75+(vertical?12:8)+(vertical?0:prefs.DockIconSpacing),prefs.IconSize*1.75+(vertical?8:12)+(vertical?prefs.DockIconSpacing:0));}
     internal static Thickness MenuPadding(Preferences prefs)=>prefs.MenuDensity==0?new(9,5,9,5):new(11,8,11,8);
     internal static void Fade(UIElement target,int milliseconds,bool enabled=true)
     {

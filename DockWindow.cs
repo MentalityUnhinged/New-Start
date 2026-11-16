@@ -367,7 +367,7 @@ public sealed partial class DockWindow : Window
             }
         });
         bool vertical=prefs.Edge==DockEdge.Left;
-        var b=new Button{Content=visual,Width=prefs.IconSize*1.75+(vertical?12:8)+prefs.DockIconSpacing,Height=prefs.IconSize*1.75+(vertical?8:12)+prefs.DockIconSpacing,Background=Brushes.Transparent,BorderThickness=new Thickness(0),ToolTip=name,VerticalAlignment=VerticalAlignment.Bottom};
+        var slot=UiMetrics.DockSlot(prefs);var b=new Button{Content=visual,Width=slot.Width,Height=slot.Height,Background=Brushes.Transparent,BorderThickness=new Thickness(0),ToolTip=name,VerticalAlignment=VerticalAlignment.Bottom};
         System.Windows.Automation.AutomationProperties.SetName(b,name);
         if(component!=null){b.ContextMenu=DockMenu();Add(b.ContextMenu,"Open Start",OpenStartFallback);CustomIcons.AddMenu(b.ContextMenu,this,prefs,component,"dock");}
         // Layered HWNDs pass through pixels with zero alpha before WPF hit testing.

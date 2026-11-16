@@ -14,6 +14,11 @@ internal static class InteractionValidation
     internal static void Run(Dictionary<string,bool> checks)
     {
         static bool Near(double first,double second)=>Math.Abs(first-second)<.000001;
+        foreach(var edge in new[]{DockEdge.Bottom,DockEdge.Top,DockEdge.Left})
+        {
+            var layout=new Preferences{Edge=edge,IconSize=36,DockIconSpacing=0};var original=UiMetrics.DockSlot(layout);layout.DockIconSpacing=20;var spaced=UiMetrics.DockSlot(layout);
+            checks["DockSpacingPreservesThickness"+edge]=edge==DockEdge.Left?Near(spaced.Width,original.Width)&&Near(spaced.Height-original.Height,20):Near(spaced.Height,original.Height)&&Near(spaced.Width-original.Width,20);
+        }
         checks["WheelRespectsWindowsLineCount"]=Near(ScrollPolicy.Units(120,3,28,false,600,1),-84);
         checks["WheelDirectionReverses"]=Near(ScrollPolicy.Units(-120,3,28,false,600,1),84);
         checks["WheelDisabledPreferenceStopsScroll"]=ScrollPolicy.Units(120,0,28,false,600,1)==0;
