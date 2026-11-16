@@ -113,7 +113,7 @@ public sealed class Preferences
         try {
             var p = JsonSerializer.Deserialize<Preferences>(File.ReadAllText(Path.Combine(Folder,"settings.json"))) ?? new();
             p.Normalize();return p;
-        } catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { return new(); }
+        } catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { var defaults=new Preferences();defaults.Normalize();return defaults; }
     }
     internal void Normalize()
     {
