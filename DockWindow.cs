@@ -25,7 +25,9 @@ public sealed partial class DockWindow : Window
     readonly DispatcherTimer controlsReleaseTimer=new(DispatcherPriority.Background){Interval=TimeSpan.FromMilliseconds(16)};
     List<Native.TaskWindow> windows=new(); string signature="";
     StartMenuWindow? startMenu;
+    Window? settingsWindow;
     AdaptiveAppBars? appBars;
+    internal PluginManager Plugins {get;}
     string settingsCategory="Dock";
     bool suppressSettingsPersistence;
     DockReservation? reservation;
@@ -119,8 +121,10 @@ public sealed partial class DockWindow : Window
     }
     public DockWindow()
     {
+        ScrollPolicy.Settings=prefs;
+        Plugins=new PluginManager(Dispatcher);Plugins.Changed+=PluginsChanged;
         dockPins=new DockPins(prefs,()=>TaskbarPins.Current);
-        tray=ThemedMenus.Create(prefs);
+        tray=DockMenu();
         Mouse.AddPreviewMouseDownOutsideCapturedElementHandler(tray,(_,e)=>{
             if(e.ChangedButton!=MouseButton.Left||controlsButton is not {IsLoaded:true} button)return;
             if(new Rect(0,0,button.ActualWidth,button.ActualHeight).Contains(e.GetPosition(button)))
@@ -144,14 +148,18 @@ public sealed partial class DockWindow : Window
         ResizeMode=ResizeMode.NoResize; ShowInTaskbar=false; Topmost=true; ShowActivated=false;
         SizeToContent=SizeToContent.Width; Height=90;
         dockSurface.Children.Add(dockGlass.Surface);dockSurface.Children.Add(blankSurface);dockSurface.Children.Add(row);Content=dockSurface;
-        var barMenu=ThemedMenus.Create(prefs);
+        var barMenu=DockMenu();
         Add(barMenu,"Task Manager",()=>Launch("taskmgr.exe"));
         Add(barMenu,"Taskbar settings",()=>Launch("ms-settings:taskbar"));
         barMenu.Items.Add(new Separator());Add(barMenu,"New Start settings",Settings);
+        Add(barMenu,"Open Start",OpenStartFallback);
         dockSurface.ContextMenu=barMenu;
         AllowDrop=true;DragOver+=DockDragOver;Drop+=DockDrop;
+        DragLeave+=(_,e)=>{if(!dragging&&!new Rect(0,0,ActualWidth,ActualHeight).Contains(e.GetPosition(this))){if(insertionMarker!=null)insertionMarker.Visibility=Visibility.Collapsed;ResetDragNeighbours();}};
         WallpaperPalette? wallpaper=null;
         Loaded+=(_,_)=>{
+            System.Windows.Interop.HwndSource.FromHwnd(new System.Windows.Interop.WindowInteropHelper(this).Handle)?.AddHook(DockInputHook);
+            RegisterHotKey(new System.Windows.Interop.WindowInteropHelper(this).Handle,0x4E53,0x4003,0x53);CustomIcons.Changed+=IconsChanged;
             wallpaper=new WallpaperPalette(Dispatcher);wallpaper.Changed+=WallpaperChanged;
             taskbarSuppression=new TaskbarSuppression(this,prefs);
             TaskbarPins.Refresh();
@@ -169,7 +177,7 @@ public sealed partial class DockWindow : Window
         // the edge-relative position after that notification has settled.
         LocationChanged+=(_,_)=>QueuePosition();
         timer.Tick+=(_,_)=>{ Refresh(); Position();taskbarSuppression?.Refresh(); clock.Text=DateTime.Now.ToString(prefs.Edge==DockEdge.Left?"HH\nmm":"t"); _=StartCatalog.Refresh();RecycleBinIcon.Refresh();TaskbarPins.Refresh(); };
-        Closed+=(_,_)=>{taskbarSuppression?.Dispose(); if(wallpaper!=null){wallpaper.Changed-=WallpaperChanged;wallpaper.Dispose();}timer.Stop(); tray.IsOpen=false;appBars?.Dispose();appBars=null; startMenu?.Close();dockGlass.Dispose();recycleWatcher?.Dispose();RecycleBinIcon.Changed-=RecycleChanged;reservation?.Dispose(); };
+        Closed+=(_,_)=>{CustomIcons.Changed-=IconsChanged;UnregisterHotKey(new System.Windows.Interop.WindowInteropHelper(this).Handle,0x4E53);taskbarSuppression?.Dispose(); if(wallpaper!=null){wallpaper.Changed-=WallpaperChanged;wallpaper.Dispose();}timer.Stop(); tray.IsOpen=false;appBars?.Dispose();appBars=null;Plugins.Changed-=PluginsChanged;Plugins.Dispose(); startMenu?.Close();dockGlass.Dispose();recycleWatcher?.Dispose();RecycleBinIcon.Changed-=RecycleChanged;reservation?.Dispose(); };
         PreviewKeyDown+=(_,e)=>{if(e.Key==Key.Escape&&!dragging){controlsKeyboardDismiss=tray.IsOpen;tray.IsOpen=false;controlsDismissedByIcon=false;startMenu?.Dismiss();e.Handled=true;}};
     }
     void RecycleChanged()
@@ -181,6 +189,19 @@ public sealed partial class DockWindow : Window
         }));
     }
     void WallpaperChanged(){if(!IsLoaded)return;UpdateDockBackground();appBars?.Refresh();}
+    [DllImport("user32.dll")]static extern bool RegisterHotKey(IntPtr window,int id,uint modifiers,uint key);
+    [DllImport("user32.dll")]static extern bool UnregisterHotKey(IntPtr window,int id);
+    IntPtr DockInputHook(IntPtr window,int message,IntPtr wParam,IntPtr lParam,ref bool handled)
+    {
+        if(message==0x21){handled=true;return new IntPtr(3);}
+        if(message==0x312&&wParam.ToInt32()==0x4E53){handled=true;OpenStartFallback();}return IntPtr.Zero;
+    }
+    void IconsChanged(){Refresh(true);appBars?.RefreshIcons();}
+    void PluginsChanged(){Refresh(true);}
+    internal void SettingsCategory(string category){settingsCategory=category;appBars?.CollapseAll();Settings();}
+    internal void RevealTray()=>taskbarSuppression?.RevealForInteraction();
+    internal void OpenStartFallback(){if(appBars?.OpenStartFallback()==true)return;OpenDockStart();}
+    void OpenDockStart(){if(startMenu==null)return;appBars?.CollapseAll();if(startMenu.IsVisible)startMenu.Dismiss();else{startMenu.AppBarPlacement=null;startMenu.OpenMenu();}}
     void QueuePosition()
     {
         if(positionQueued||!IsLoaded||Dispatcher.HasShutdownStarted)return;positionQueued=true;
@@ -330,6 +351,8 @@ public sealed partial class DockWindow : Window
     }
     Button MakeIcon(object content,string name,Action<Button> action)
     {
+        string? component=name switch{"Start"=>"component:start","Task View"=>"component:task-view","Show Desktop"=>"component:show-desktop","System controls"=>"component:system-controls","Recycle Bin"=>"component:recycle-bin",_=>null};
+        if(component!=null&&CustomIcons.Cached(component,"dock") is {} icon)content=new Image{Source=icon,Width=36,Height=36};
         var visual=new Grid{Width=prefs.IconSize,Height=prefs.IconSize,Background=new SolidColorBrush(Color.FromArgb(1,0,0,0)),RenderTransformOrigin=new Point(.5,.5)};
         var scale=new ScaleTransform(1,1); var translate=new TranslateTransform();
         visual.RenderTransform=new TransformGroup{Children=new TransformCollection{scale,translate}};
@@ -344,8 +367,9 @@ public sealed partial class DockWindow : Window
             }
         });
         bool vertical=prefs.Edge==DockEdge.Left;
-        var b=new Button{Content=visual,Width=prefs.IconSize*1.75+(vertical?12:8),Height=prefs.IconSize*1.75+(vertical?8:12),Background=Brushes.Transparent,BorderThickness=new Thickness(0),ToolTip=name,VerticalAlignment=VerticalAlignment.Bottom};
+        var b=new Button{Content=visual,Width=prefs.IconSize*1.75+(vertical?12:8)+prefs.DockIconSpacing,Height=prefs.IconSize*1.75+(vertical?8:12)+prefs.DockIconSpacing,Background=Brushes.Transparent,BorderThickness=new Thickness(0),ToolTip=name,VerticalAlignment=VerticalAlignment.Bottom};
         System.Windows.Automation.AutomationProperties.SetName(b,name);
+        if(component!=null){b.ContextMenu=DockMenu();Add(b.ContextMenu,"Open Start",OpenStartFallback);CustomIcons.AddMenu(b.ContextMenu,this,prefs,component,"dock");}
         // Layered HWNDs pass through pixels with zero alpha before WPF hit testing.
         // Alpha 1 keeps the full button interactive without a visible container.
         var hitSurface=new FrameworkElementFactory(typeof(Border));
@@ -388,12 +412,7 @@ public sealed partial class DockWindow : Window
         SizeToContent=SizeToContent.Manual;
         if(vertical){Height=double.NaN;Width=prefs.IconSize*1.75+36;SizeToContent=SizeToContent.Height;}
         else{Width=double.NaN;Height=prefs.IconSize*1.75+36;SizeToContent=SizeToContent.Width;}
-        startButton=MakeIcon(new Ellipse{Width=25,Height=25,Stroke=Brushes.White,StrokeThickness=2},"Start",_=>{
-            if(startMenu?.IsVisible==true){startMenu.Dismiss();return;}
-            if((DateTime.UtcNow-startClosed).TotalMilliseconds<250)return;
-            if(startMenu!=null)startMenu.AppBarPlacement=null;
-            startMenu?.OpenMenu();
-        });startButton.Loaded+=(_,_)=>QueuePosition();if(appBars==null||!appBars.Windows.Any())row.Children.Add(startButton);
+        startButton=MakeIcon(new Ellipse{Width=25,Height=25,Stroke=Brushes.White,StrokeThickness=2},"Start",_=>OpenDockStart());startButton.Loaded+=(_,_)=>QueuePosition();if(prefs.ShowDockStart??!prefs.AppBarEnabled)row.Children.Add(startButton);
         var taskViewIcon=new System.Windows.Shapes.Path
         {
             Data=Geometry.Parse("M 3,7 L 21,7 L 21,29 L 3,29 Z M 26,7 L 33,7 L 33,29 L 26,29 Z"),
@@ -403,27 +422,26 @@ public sealed partial class DockWindow : Window
             startMenu?.Dismiss();
             if(!Native.TaskView())MessageBox.Show("Windows could not open Task View. You can use Windows + Tab.","New Start");
         }));
-        var running=windows.Select(w=>w.Path).Where(p=>!effectivePins.Any(pin=>PinIdentity.Matches(pin,p))).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var running=windows.Where(window=>!effectivePins.Any(pin=>PinIdentity.Matches(pin,window))).Select(window=>window.Target).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         bool runningStarted=false;
         foreach(var path in effectivePins.Concat(running))
         {
             bool pinned=effectivePins.Contains(path,StringComparer.OrdinalIgnoreCase);
             if(!pinned&&!runningStarted){Separator("Pinned and running apps separator");runningStarted=true;}
-            var tasks=windows.Where(w=>PinIdentity.Matches(path,w.Path)).ToList();
-            var image=new Image{Source=StartCatalog.CachedIcon(path)};
-            image.Loaded+=async(_,_)=>image.Source=await StartCatalog.Icon(path);
+            var tasks=windows.Where(w=>PinIdentity.Matches(path,w)).ToList();
+            var image=new Image{Source=CustomIcons.Cached(path,"dock")??StartCatalog.CachedIcon(path)};
+            image.Loaded+=async(_,_)=>image.Source=await CustomIcons.Resolve(path,"dock");
             var cell=new Grid{Width=36,Height=36}; cell.Children.Add(image);
             if(tasks.Count>0&&prefs.Indicators) cell.Children.Add(new Ellipse{Width=4,Height=4,Fill=dockInk,VerticalAlignment=VerticalAlignment.Bottom,Margin=new Thickness(0,0,0,prefs.DockBackground?-2:-9)});
             string displayName=StartCatalog.Current?.Apps.FirstOrDefault(a=>string.Equals(a.Target,path,StringComparison.OrdinalIgnoreCase))?.Name??System.IO.Path.GetFileNameWithoutExtension(path);
             var button=MakeIcon(cell,displayName,b=>{
-                if(tasks.Count==0){if(Launch(path)) Bounce(b);}
-                else if(tasks.Count==1) Activate(tasks[0]);
-                else {var menu=ThemedMenus.Create(prefs);foreach(var w in tasks)Add(menu,w.Title,()=>Activate(w)); menu.PlacementTarget=b;menu.IsOpen=true;}
-            });
-            var context=ThemedMenus.Create(prefs);
+                var live=Native.Windows().Where(window=>PinIdentity.Matches(path,window)).ToList();
+                if(live.Count==0){if(Launch(path))Bounce(b);}
+                else if(!ApplicationActivation.Toggle(live,Native.GetForegroundWindow()))MessageBox.Show("Windows declined window activation. Use Alt+Tab to switch to this window.","New Start");            });
+            var context=DockMenu();
             Add(context,displayName,()=>{if(Launch(path))Bounce(button);});
             Add(context,pinned?"Unpin from taskbar":"Pin to taskbar",()=>{if(pinned)dockPins.Remove(path);else dockPins.Place(path,dockPins.All().Count);Save();Refresh(true);});
-            if(tasks.Count>0)Add(context,tasks.Count==1?"Close window":"Close all windows",()=>{foreach(var task in Native.Windows().Where(w=>PinIdentity.Matches(path,w.Path)))Native.CloseWindow(task.Handle);});
+            if(tasks.Count>0)Add(context,tasks.Count==1?"Close window":"Close all windows",()=>{foreach(var task in Native.Windows().Where(w=>PinIdentity.Matches(path,w)))Native.CloseWindow(task.Handle);});
             int menuGeneration=0;
             context.Closed+=(_,_)=>menuGeneration++;
             context.Opened+=async(_,_)=>{
@@ -438,9 +456,16 @@ public sealed partial class DockWindow : Window
             if(pinned){Add(context,vertical?"Move up":"Move left",()=>MovePin(path,-1));Add(context,vertical?"Move down":"Move right",()=>MovePin(path,1));}
             foreach(var w in tasks)Add(context,w.Title,()=>Activate(w));
             AttachPinDrag(button,path,pinned);if(pinned)pinButtons.Add((path,button));
-            button.ContextMenu=context; row.Children.Add(button);
+            CustomIcons.AddMenu(context,this,prefs,path,"dock");button.ContextMenu=context; row.Children.Add(button);
         }
         Separator("Dock utilities separator");
+        foreach(var component in Plugins.ComponentsFor("Dock"))
+        {
+            string id=component.PluginId;var plugin=Plugins.BuildCompactButton(id,()=>ConfigurationWindow.Open(this,prefs,component.Label,Plugins.BuildPanel(id),420,460));
+            plugin.Width=prefs.IconSize*1.75+8;plugin.Height=prefs.IconSize+12;
+            var menu=DockMenu();Add(menu,"Configure plugins…",()=>Plugins.OpenConfiguration(this,prefs));plugin.ContextMenu=menu;row.Children.Add(plugin);
+        }
+        if(prefs.DockTaskTray)row.Children.Add(NotificationTray.BuildButton(this,prefs,RevealTray,()=>SurfaceAppearance.MenuPreferences(prefs,false,DockMonitorName())));
         var controlsIcon=new System.Windows.Shapes.Path{Data=Geometry.Parse("M 4,8 L 32,8 M 4,18 L 32,18 M 4,28 L 32,28 M 12,4 L 12,12 M 24,14 L 24,22 M 15,24 L 15,32"),Stroke=Brushes.White,StrokeThickness=2,StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round,Width=36,Height=36};
         if(prefs.ShowSystemControls){var expand=MakeIcon(controlsIcon,"System controls",b=>{
             if(tray.IsOpen){tray.IsOpen=false;controlsDismissedByIcon=false;return;}
@@ -464,12 +489,12 @@ public sealed partial class DockWindow : Window
         recycleImage.Source=RecycleBinIcon.Current;
         if(recycleImage.Parent is Viewbox oldParent)oldParent.Child=null;
         var recycle=MakeIcon(recycleImage,"Recycle Bin",_=>Launch("shell:RecycleBinFolder"));
-        var recycleMenu=ThemedMenus.Create(prefs);Add(recycleMenu,"Open Recycle Bin",()=>Launch("shell:RecycleBinFolder"));
+        var recycleMenu=DockMenu();Add(recycleMenu,"Open Recycle Bin",()=>Launch("shell:RecycleBinFolder"));
         var empty=new MenuItem{Header="Empty Recycle Bin",Icon=new TextBlock{Text="\uE74D",FontFamily=new FontFamily("Segoe Fluent Icons"),FontSize=15}};
         emptyRecycleItem=empty;
         empty.Click+=(_,_)=>EmptyRecycleBin();recycleMenu.Items.Add(empty);
         recycleMenu.Opened+=(_,_)=>{RecycleBinIcon.Refresh(true);empty.IsEnabled=!emptyingRecycleBin&&RecycleBinIcon.HasItems!=false;};
-        recycle.ContextMenu=recycleMenu;row.Children.Add(recycle);
+        CustomIcons.AddMenu(recycleMenu,this,prefs,"component:recycle-bin","dock");recycle.ContextMenu=recycleMenu;row.Children.Add(recycle);
     }
     void EmptyRecycleBin()
     {
@@ -516,22 +541,23 @@ public sealed partial class DockWindow : Window
         button.PreviewMouseLeftButtonDown+=(_,e)=>{origin=e.GetPosition(button);pressed=true;};
         button.PreviewMouseLeftButtonUp+=(_,_)=>pressed=false;
         button.PreviewMouseMove+=(_,e)=>{
-            if(!pressed||dragging||e.LeftButton!=MouseButtonState.Pressed)return;
+            if(!prefs.DockDragging||!pressed||dragging||e.LeftButton!=MouseButtonState.Pressed)return;
             Point point=e.GetPosition(button);if(Math.Abs(point.X-origin.X)<SystemParameters.MinimumHorizontalDragDistance&&Math.Abs(point.Y-origin.Y)<SystemParameters.MinimumVerticalDragDistance)return;
-            pressed=false;e.Handled=true;bool cancelled=false,releasedOutside=false;
+            pressed=false;e.Handled=true;bool cancelled=false,releasedOutside=false;DragDropEffects result=DragDropEffects.None;
             QueryContinueDragEventHandler continuation=(_,args)=>{
                 if(args.EscapePressed){cancelled=true;args.Action=DragAction.Cancel;return;}
                 if((args.KeyStates&DragDropKeyStates.LeftMouseButton)==0&&GetCursorPos(out var cursor))
                 {
                     var local=PointFromScreen(new Point(cursor.X,cursor.Y));
-                    releasedOutside=local.X < -32||local.X>ActualWidth+32||local.Y < -32||local.Y>ActualHeight+32;
+                    releasedOutside=RemovalAt(local);
                 }
             };
-            button.QueryContinueDrag+=continuation;dragging=true;button.Opacity=.5;
-            try{DragDrop.DoDragDrop(button,new DataObject(DockPins.DragFormat,path),DragDropEffects.Move|DragDropEffects.Copy);}
-            finally{button.QueryContinueDrag-=continuation;dragging=false;button.Opacity=1;suppressClickUntil=DateTime.UtcNow.AddMilliseconds(250);}
+            button.QueryContinueDrag+=continuation;dragging=true;
+            try{try{BeginDragFeedback(button,path,pinned);}catch{EndDragFeedback(false);}button.Opacity=.35;result=DragDrop.DoDragDrop(button,new DataObject(DockPins.DragFormat,path),DragDropEffects.Move|DragDropEffects.Copy);}
+            catch(Exception error){cancelled=true;MessageBox.Show("The pin could not be dragged: "+error.Message,"New Start");}
+            finally{button.QueryContinueDrag-=continuation;EndDragFeedback(pinned&&!cancelled&&releasedOutside);dragging=false;button.Opacity=1;suppressClickUntil=DateTime.UtcNow.AddMilliseconds(250);}
             if(pinned&&!cancelled&&releasedOutside){dockPins.Remove(path);Save();}
-            Refresh(true);
+            Refresh(true);if(!cancelled&&!releasedOutside&&result!=DragDropEffects.None)AnimateDroppedPin(path);
         };
     }
     static bool IsApplicationFile(string path)=>File.Exists(path)&&(System.IO.Path.GetExtension(path).ToLowerInvariant() is ".exe" or ".lnk" or ".appref-ms");
@@ -543,14 +569,15 @@ public sealed partial class DockWindow : Window
     }
     void DockDragOver(object sender,DragEventArgs e)
     {
-        e.Effects=DragApplications(e.Data).Count==0?DragDropEffects.None:e.Data.GetDataPresent(DockPins.DragFormat)?DragDropEffects.Move:DragDropEffects.Copy;e.Handled=true;
+        var apps=DragApplications(e.Data);e.Effects=!prefs.DockDragging||apps.Count==0?DragDropEffects.None:e.Data.GetDataPresent(DockPins.DragFormat)?DragDropEffects.Move:DragDropEffects.Copy;if(e.Effects!=DragDropEffects.None)UpdateDragFeedback(e.GetPosition(this),e.Data.GetDataPresent(DockPins.DragFormat)?apps[0]:null);e.Handled=true;
     }
     void DockDrop(object sender,DragEventArgs e)
     {
-        var apps=DragApplications(e.Data);if(apps.Count==0){e.Effects=DragDropEffects.None;e.Handled=true;return;}
+        var apps=DragApplications(e.Data);if(!prefs.DockDragging||apps.Count==0){e.Effects=DragDropEffects.None;e.Handled=true;return;}
         bool vertical=prefs.Edge==DockEdge.Left;var drop=e.GetPosition(this);double axis=vertical?drop.Y:drop.X;
-        int index=pinButtons.Count(pin=>!apps.Any(app=>string.Equals(PinIdentity.Resolve(app),PinIdentity.Resolve(pin.Path),StringComparison.OrdinalIgnoreCase))&&PinAxis(pin.Button,vertical)<axis);
+        int index=DockDragGeometry.InsertionIndex(pinButtons.Where(pin=>!apps.Any(app=>string.Equals(PinIdentity.Resolve(app),PinIdentity.Resolve(pin.Path),StringComparison.OrdinalIgnoreCase))).Select(pin=>PinBounds(pin.Button)).ToArray(),drop,vertical);
         bool external=!e.Data.GetDataPresent(DockPins.DragFormat);
+        var saved=(prefs.Pins.ToList(),prefs.HiddenTaskbarPins.ToList(),prefs.DockPinOrder.ToList());var copies=new List<string>();
         try{
             foreach(var app in apps)
             {
@@ -559,16 +586,17 @@ public sealed partial class DockWindow : Window
                 {
                     var existing=dockPins.All().FirstOrDefault(pin=>string.Equals(PinIdentity.Resolve(pin),PinIdentity.Resolve(app),StringComparison.OrdinalIgnoreCase));
                     if(existing!=null)target=existing;
-                    else{string folder=System.IO.Path.Combine(Preferences.Folder,"Pins",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(folder);target=System.IO.Path.Combine(folder,System.IO.Path.GetFileName(app));File.Copy(app,target);}
+                    else{string folder=System.IO.Path.Combine(Preferences.Folder,"Pins",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(folder);target=System.IO.Path.Combine(folder,System.IO.Path.GetFileName(app));copies.Add(target);File.Copy(app,target);}
                 }
                 dockPins.Place(target,index++);
             }
-            Save();e.Effects=external?DragDropEffects.Copy:DragDropEffects.Move;
-        }catch(Exception error){MessageBox.Show("Could not pin this application: "+error.Message,"New Start");e.Effects=DragDropEffects.None;}
-        e.Handled=true;if(!dragging)Refresh(true);
+            if(!suppressSettingsPersistence)prefs.Save();e.Effects=external?DragDropEffects.Copy:DragDropEffects.Move;
+        }catch(Exception error){prefs.Pins=saved.Item1;prefs.HiddenTaskbarPins=saved.Item2;prefs.DockPinOrder=saved.Item3;foreach(string file in copies)try{if(File.Exists(file))File.Delete(file);string folder=System.IO.Path.GetDirectoryName(file)!;if(!Directory.EnumerateFileSystemEntries(folder).Any())Directory.Delete(folder);}catch{}MessageBox.Show("Could not pin this application: "+error.Message,"New Start");e.Effects=DragDropEffects.None;}
+        e.Handled=true;if(insertionMarker!=null)insertionMarker.Visibility=Visibility.Collapsed;ResetDragNeighbours();if(!dragging)Refresh(true);
     }
-    double PinAxis(Button button,bool vertical){var point=button.TranslatePoint(new Point(button.ActualWidth/2,button.ActualHeight/2),this);return vertical?point.Y:point.X;}
+    double PinAxis(Button button,bool vertical){var rect=PinBounds(button);return vertical?rect.Top+rect.Height/2:rect.Left+rect.Width/2;}
     void Save(){if(suppressSettingsPersistence)return;try{prefs.Save();}catch(Exception e){MessageBox.Show("Could not save settings: "+e.Message);}}
+    ContextMenu DockMenu()=>ThemedMenus.Create(prefs,()=>SurfaceAppearance.MenuPreferences(prefs,false,DockMonitorName()));
     static void Add(ContextMenu menu,string title,Action action){var item=new MenuItem{Header=title};item.Click+=(_,_)=>action();menu.Items.Add(item);}
     static bool Launch(string target){try{Process.Start(new ProcessStartInfo(target){UseShellExecute=true});return true;}catch(Exception e){MessageBox.Show(e.Message,"Could not open");return false;}}
     static void Activate(Native.TaskWindow w){if(Native.GetForegroundWindow()==w.Handle){Native.ShowWindowAsync(w.Handle,6);return;}if(Native.IsIconic(w.Handle))Native.ShowWindowAsync(w.Handle,9);if(!Native.SetForegroundWindow(w.Handle))MessageBox.Show("Windows declined window activation. Use Alt+Tab to switch to this window.");}
@@ -594,8 +622,9 @@ public sealed partial class DockWindow : Window
     internal void Settings()
     {
         if(appBars?.OpenSettings()==true)return;
+        if(settingsWindow is {IsVisible:true}){settingsWindow.Activate();return;}
         var dialog=new Window{Title="New Start settings (Beta)",WindowStyle=WindowStyle.None,AllowsTransparency=true,Width=500,Height=Math.Min(740,SystemParameters.WorkArea.Height-32),MinWidth=420,MinHeight=400,Owner=this,WindowStartupLocation=WindowStartupLocation.CenterScreen,ResizeMode=ResizeMode.NoResize};
-        NativeBackdrop.Configure(dialog);dialog.Content=SettingsContents(dialog,dialog.Close,false,out var release);dialog.Closed+=(_,_)=>release();dialog.ShowDialog();
+        settingsWindow=dialog;NativeBackdrop.Configure(dialog);dialog.Content=SettingsContents(dialog,dialog.Close,false,out var release);dialog.Closed+=(_,_)=>{settingsWindow=null;release();};dialog.ShowDialog();
     }
     internal FrameworkElement SettingsContents(Window dialog,Action dismiss,bool embedded,out Action release)
     {
@@ -615,7 +644,7 @@ public sealed partial class DockWindow : Window
         void ApplyTheme(){bool dark=Appearance.IsDark(prefs.Theme);if(lastDark!=dark||lastHighContrast!=SystemParameters.HighContrast){lastDark=dark;lastHighContrast=SystemParameters.HighContrast;if(!embedded)Appearance.Apply(dialog,dark);}lastTransparency=NativeBackdrop.TransparencyAllowed();if(!embedded)Appearance.ApplySurface(dialog,settingsFrame,dark,prefs.StartTransparency,prefs.MenuBlur);UpdateDockBackground();appBars?.Refresh();}
         if(!embedded)dialog.SourceInitialized+=(_,_)=>{lastDark=null;ApplyTheme();};
         themeTimer.Tick+=(_,_)=>{if(lastDark!=Appearance.IsDark(prefs.Theme)||lastHighContrast!=SystemParameters.HighContrast||lastTransparency!=NativeBackdrop.TransparencyAllowed())ApplyTheme();};
-        void Toggle(string label,bool value,Action<bool> set){var c=new CheckBox{Content=label,IsChecked=value,Margin=new Thickness(0,6,0,6)};c.Click+=(_,_)=>set(c.IsChecked==true);panel.Children.Add(c);}
+        void Toggle(string label,bool value,Action<bool> set){var c=new CheckBox{Content=label,IsChecked=value,Margin=new Thickness(0,5,0,5)};c.Click+=(_,_)=>{set(c.IsChecked==true);Save();};panel.Children.Add(c);}
         void Slider(string label,double value,double min,double max,Action<double> set){var t=new TextBlock();var s=new Slider{Minimum=min,Maximum=max,Value=Math.Round(value),TickFrequency=1,IsSnapToTickEnabled=true,SmallChange=1,LargeChange=5,Margin=new Thickness(0,5,0,12)};void Update(){t.Text=$"{label}: {s.Value:0}";set(Math.Round(s.Value));}s.ValueChanged+=(_,_)=>Update();Update();panel.Children.Add(t);panel.Children.Add(s);}
         void Section(string label)
         {
@@ -642,6 +671,9 @@ public sealed partial class DockWindow : Window
         var themes=new ComboBox{ItemsSource=new[]{"System","Light","Dark"},SelectedIndex=prefs.Theme,Margin=new Thickness(0,0,0,16)};
         themes.SelectionChanged+=(_,_)=>{prefs.Theme=themes.SelectedIndex;ApplyTheme();};panel.Children.Add(themes);
         Section("Dock");Slider("Icon size (px)",prefs.IconSize,16,64,v=>{prefs.IconSize=Math.Round(v);Refresh(true);});
+        Toggle("Show Start button in Dock",prefs.ShowDockStart??!prefs.AppBarEnabled,v=>{prefs.ShowDockStart=v;Refresh(true);});
+        Toggle("Show Windows notification area access in Dock",prefs.DockTaskTray,v=>{prefs.DockTaskTray=v;Refresh(true);});
+        panel.Children.Add(new TextBlock{Text="Open Start at any time with Ctrl+Alt+S or the bar’s right-click menu. Windows + B focuses the official tray.",FontSize=12,Opacity=.7,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,2,0,8)});
         Toggle("macOS-style dock background",prefs.DockBackground,v=>{prefs.DockBackground=v;Refresh(true);Position();});
         panel.Children.Add(new TextBlock{Text="Background colour, transparency and blur are independent in Appearance.",Opacity=.65,FontSize=12,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,8)});
         Toggle("Reserve space for dock",prefs.ReserveDockSpace,v=>{prefs.ReserveDockSpace=v;Position();});
@@ -662,6 +694,10 @@ public sealed partial class DockWindow : Window
         var restorePins=new Button{Content="Restore hidden Windows taskbar pins",Margin=new Thickness(0,4,0,8)};restorePins.Click+=(_,_)=>{prefs.HiddenTaskbarPins.Clear();Refresh(true);};panel.Children.Add(restorePins);
         Section("Adaptive AppBar · Beta");
         Toggle("Enable Adaptive AppBar",prefs.AppBarEnabled,v=>{EnableAppBar(v);edges.SelectedIndex=(int)prefs.Edge;UpdateAlignments();});
+        Toggle("Show Start button in AppBar",prefs.ShowAppBarStart,v=>{prefs.ShowAppBarStart=v;appBars?.Refresh();});
+        Toggle("Show contextual application menus",prefs.AppBarApplicationMenu,v=>{prefs.AppBarApplicationMenu=v;appBars?.Refresh();});
+        Toggle("Show Windows notification area access in AppBar",prefs.AppBarTaskTray,v=>{prefs.AppBarTaskTray=v;appBars?.Refresh();});
+        panel.Children.Add(new TextBlock{Text="Application menus show only commands exposed by the active app. Notification area access opens Explorer’s real tray; Windows does not provide a supported API to host every third-party tray icon.",FontSize=12,Opacity=.7,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,2,0,8)});
         panel.Children.Add(new TextBlock{Text="AppBar background colour, transparency and blur: Appearance.",TextWrapping=TextWrapping.Wrap,Opacity=.7,Margin=new Thickness(0,0,0,8)});
         Toggle("Show AppBar on every display",prefs.AppBarAllMonitors,v=>{prefs.AppBarAllMonitors=v;appBars?.Refresh(true);});
         Toggle("Expand media on hover",prefs.AppBarMediaHover,v=>prefs.AppBarMediaHover=v);
@@ -695,13 +731,15 @@ public sealed partial class DockWindow : Window
         panel.Children.Add(new TextBlock{Text="Keeps the Windows taskbar hidden until you press a Windows key. Official Start and taskbar access remain available; suppression resumes after you leave them.",TextWrapping=TextWrapping.Wrap,Opacity=.7,FontSize=12,Margin=new Thickness(0,3,0,8)});
         panel.Children.Add(new TextBlock{Text=$"Windows taskbar auto-hide: {(Native.AutoHide?"enabled":"disabled")}",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,12)});
         Section("Dock");var pin=new Button{Content="Pin an application…",Margin=new Thickness(0,4,0,4)};pin.Click+=(_,_)=>{var f=new OpenFileDialog{Filter="Applications and shortcuts|*.exe;*.lnk;*.appref-ms"};if(f.ShowDialog(dialog)==true){dockPins.Place(f.FileName,dockPins.All().Count);Save();Refresh(true);}};panel.Children.Add(pin);
+        Section("Extensions");
+        var plugins=new Button{Content="Plugins…",Margin=new Thickness(0,4,0,4)};plugins.Click+=(_,_)=>Plugins.OpenConfiguration(dialog,prefs);panel.Children.Add(plugins);
+        var icons=new Button{Content="Custom Icons…",Margin=new Thickness(0,4,0,4)};icons.Click+=(_,_)=>CustomIcons.Open(dialog,prefs);panel.Children.Add(icons);
         Section("Windows");
         var native=new Button{Content="Windows taskbar preferences",Margin=new Thickness(0,4,0,4)};native.Click+=(_,_)=>Launch("ms-settings:taskbar");panel.Children.Add(native);
         var exit=new Button{Content="Exit dock — keep Windows taskbar",Margin=new Thickness(0,4,0,4)};exit.Click+=(_,_)=>{dismiss();Close();};panel.Children.Add(exit);
-        navigation.Children.Clear();foreach(string category in new[]{"Dock","AppBar","Appearance","Motion","Windows"})navigation.Children.Add(navButtons[category]);
+        Section("Advanced");panel.Children.Add(AdvancedSettings.Create(prefs,()=>{Save();Refresh(true);Position();appBars?.Refresh(true);},()=>Plugins.OpenConfiguration(dialog,prefs)));
+        navigation.Children.Clear();foreach(string category in new[]{"Dock","AppBar","Appearance","Motion","Windows","Extensions","Advanced"})navigation.Children.Add(navButtons[category]);
         SelectCategory(groups.ContainsKey(settingsCategory)?settingsCategory:"Dock");ApplyTheme();if(!embedded)themeTimer.Start();
         release=()=>{themeTimer.Stop();Save();Refresh(true);};return settingsFrame;
     }
 }
-
-

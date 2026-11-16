@@ -8,6 +8,7 @@
     <InformationalVersion>0.1.0-beta.1</InformationalVersion>
     <PlatformTarget>x64</PlatformTarget>
     <ApplicationIcon>assets/NewStart.ico</ApplicationIcon>
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts/**</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup><Content Include="native/build/NewStart.Backdrop.dll" Link="NewStart.Backdrop.dll" CopyToOutputDirectory="PreserveNewest"/></ItemGroup>
 </Project>

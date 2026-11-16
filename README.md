@@ -26,6 +26,10 @@ New Start is an experimental native Windows 11 dock and custom Start menu, built
 - Optional [Adaptive AppBar](docs/ADAPTIVE-APPBAR.md): per-display resting reservation, attached adaptive controls, media sessions/artwork, native volume/mute, Wi-Fi discovery/profiles, Bluetooth radio/paired-device state, clock/calendar and active-window controls. Shared colour theme with separate AppBar blur/transparency sliders.
 - [Application context and colour](docs/CONTEXT-AND-COLOUR.md): packaged/Win32 window identity, bounded accessibility actions, optional application adapters, independent Dock/AppBar custom colours and wallpaper-derived palettes.
 - Experimental standard-frame borderless management, off by default, with per-app exclusions, original-style journal, independent recovery helper and startup/manual recovery.
+- Optional contextual application menus beside Start, exposing verified accessibility commands; independent Start buttons in Dock and AppBar, with Ctrl+Alt+S and context-menu access when hidden.
+- Compact shared scrolling/density controls, advanced drill-down settings, scoped custom icon overrides and dedicated configuration windows. See [interaction and customisation](docs/INTERACTION-AND-CUSTOMISATION.md).
+- Connected power panel with reported battery health/capacity/cycles where available, Sound media transport/seeking, and independently placed access to Explorer’s real notification area.
+- Restricted [plugin API 1](docs/PLUGINS.md) with permission grants, lifecycle/diagnostics and a Codex usage provider using the authorised local app-server protocol. Plugins start disabled; generic ChatGPT chat limits and API billing are separate.
 
 ## Screenshots
 
@@ -64,6 +68,8 @@ Keep `NewStart.Backdrop.dll` and the other generated runtime files beside the ex
 
 Right-click blank dock space → **New Start settings**. Select the dock edge and alignment there. Escape dismisses menus; use **Exit dock** in settings to exit. Explorer is left intact throughout.
 
+Plugins and Custom Icons have dedicated windows under **Settings → Extensions** and the AppBar context menu. **Settings → Advanced** reveals deeper controls without resetting hidden preferences. Right-click advanced controls for individual resets; each detail page also has a section reset.
+
 ## Project outline
 
 | Area | Main files |
@@ -77,6 +83,10 @@ Right-click blank dock space → **New Start settings**. Select the dock edge an
 | Active windows and safe caption management | `ActiveApplication.cs`, `BorderlessManager.cs` |
 | Local account/folder/Recycle Bin adapters | `AccountIdentity.cs`, `StartShortcuts.cs`, `RecycleBinIcon.cs` |
 | Defaults and persistence | `Preferences.cs` |
+| Application menus and verified actions | `ApplicationCapabilities.cs`, `ApplicationMenuDiscovery.cs`, `AppBarExtensions.cs` |
+| Plugins and Codex usage | `PluginFramework.cs`, `PluginProviders.cs`, `CodexUsageClient.cs`, `PluginConfigurationWindow.cs` |
+| Power, media and native tray access | `PowerPanel.cs`, `PowerBatteryDevices.cs`, `AppBarMedia.cs`, `NotificationTray.cs` |
+| Icons, scrolling and advanced settings | `CustomIcons.cs`, `UiInteraction.cs`, `AdvancedSettings.cs`, `DockDragFeedback.cs` |
 | Original branding | `assets/logo.svg`, `assets/Generate-Icon.ps1` |
 | Checks | `AuditValidation.cs`, `PinDragValidation.cs`, `LocationValidation.cs` |
 

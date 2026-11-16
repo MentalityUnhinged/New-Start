@@ -25,7 +25,7 @@ internal sealed class StartMenuWindow : Window
     readonly StackPanel sectionPips=new(){VerticalAlignment=VerticalAlignment.Center,HorizontalAlignment=HorizontalAlignment.Right,Margin=new Thickness(0,0,5,0)};
     readonly List<UniformGrid> pinnedSections=new();
     readonly List<Ellipse> pipDots=new();
-    bool pinnedView;double sectionHeight=420;DateTime lastSectionWheel;
+    bool pinnedView;double sectionHeight=420;
     StartData? data;bool allApps;int page;bool modalOpen;
     bool? lastDark;
     bool lastHighContrast;
@@ -116,11 +116,7 @@ internal sealed class StartMenuWindow : Window
             if(e.ViewportHeightChange!=0)SizeSections();
             UpdatePips((int)Math.Round(scroll.VerticalOffset/sectionHeight));
         };
-        scroll.PreviewMouseWheel+=(_,e)=>{
-            if(!pinnedView)return;e.Handled=true;
-            if(e.Delta==0||(DateTime.UtcNow-lastSectionWheel).TotalMilliseconds<180)return;
-            lastSectionWheel=DateTime.UtcNow;GoSection(page+(e.Delta<0?1:-1));
-        };
+        ScrollPolicy.Paged(scroll,()=>pinnedView,steps=>GoSection(page+steps));
         scroll.RequestBringIntoView+=(_,e)=>{
             if(!pinnedView)return;e.Handled=true;
             if(e.TargetObject is DependencyObject target)
@@ -143,7 +139,7 @@ internal sealed class StartMenuWindow : Window
         }
         ApplyAccount();
         void AccountUpdated()=>Dispatcher.BeginInvoke(new Action(ApplyAccount));
-        AccountIdentity.Updated+=AccountUpdated;Closed+=(_,_)=>AccountIdentity.Updated-=AccountUpdated;
+        AccountIdentity.Updated+=AccountUpdated;CustomIcons.Changed+=RefreshCustomIcons;Closed+=(_,_)=>{AccountIdentity.Updated-=AccountUpdated;CustomIcons.Changed-=RefreshCustomIcons;};
         var powerIcon=new System.Windows.Shapes.Path{Data=Geometry.Parse("M 12,2 L 12,12 M 5,5 A 10,10 0 1 0 19,5"),Width=20,Height=20,Stretch=Stretch.Uniform,StrokeThickness=1.7,StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
         powerIcon.SetBinding(Shape.StrokeProperty,new Binding("Foreground"){RelativeSource=new RelativeSource(RelativeSourceMode.FindAncestor,typeof(Button),1)});
         var powerFrame=new Grid{Width=24,Height=24,ClipToBounds=true};powerFrame.Children.Add(powerIcon);
@@ -235,11 +231,11 @@ internal sealed class StartMenuWindow : Window
     Button AppButton(StartApp app,bool tile)
     {
         var panel=new StackPanel{Orientation=tile?Orientation.Vertical:Orientation.Horizontal};
-        var image=new Image{Source=app.Icon??StartCatalog.CachedIcon(app.Target),Width=tile?32:28,Height=tile?32:28,Margin=tile?new Thickness(0,2,0,7):new Thickness(0,0,16,0)};
+        var image=new Image{Source=CustomIcons.Cached(app.Target,"application")??app.Icon??StartCatalog.CachedIcon(app.Target),Width=tile?32:28,Height=tile?32:28,Margin=tile?new Thickness(0,2,0,7):new Thickness(0,0,16,0)};
         panel.Children.Add(image);
-        image.Loaded+=async(_,_)=>{image.Source=await StartCatalog.Icon(app.Target);};
+        image.Loaded+=async(_,_)=>{image.Source=await CustomIcons.Resolve(app.Target,"application");};
         panel.Children.Add(new TextBlock{Text=app.Name,FontSize=12,TextAlignment=tile?TextAlignment.Center:TextAlignment.Left,TextTrimming=TextTrimming.CharacterEllipsis,VerticalAlignment=VerticalAlignment.Center,MaxWidth=tile?82:450});
-        var b=new Button{Content=panel,ToolTip=app.Name,Height=tile?double.NaN:44,Padding=new Thickness(5),Margin=new Thickness(2),HorizontalContentAlignment=tile?HorizontalAlignment.Center:HorizontalAlignment.Left};
+        var b=new Button{Content=panel,ToolTip=app.Name,Height=tile?double.NaN:prefs.MenuDensity==0?36:44,Padding=new Thickness(5),Margin=new Thickness(2),HorizontalContentAlignment=tile?HorizontalAlignment.Center:HorizontalAlignment.Left};
         // Tiles have no permanent border or fill, as in the original Start pinned grid.
         var border=new FrameworkElementFactory(typeof(Border));border.SetValue(Border.BackgroundProperty,Brushes.Transparent);border.SetValue(Border.CornerRadiusProperty,new CornerRadius(4));border.SetValue(Border.PaddingProperty,new Thickness(5));border.Name="Tile";
         var presenter=new FrameworkElementFactory(typeof(ContentPresenter));presenter.SetValue(ContentPresenter.HorizontalAlignmentProperty,tile?HorizontalAlignment.Center:HorizontalAlignment.Left);presenter.SetValue(ContentPresenter.VerticalAlignmentProperty,VerticalAlignment.Center);border.AppendChild(presenter);
@@ -260,6 +256,7 @@ internal sealed class StartMenuWindow : Window
             }
             bool startPinned=VisiblePins().Any(pin=>SameApp(pin.Target,app.Target));
             Add(context,startPinned?"Unpin from Start":"Pin to Start",()=>SetStartPin(app,!startPinned));
+            CustomIcons.AddMenu(context,ModalOwner,prefs,app.Target,"application");
         };
         Point origin=default;bool pressed=false;
         b.PreviewMouseLeftButtonDown+=(_,e)=>{origin=e.GetPosition(b);pressed=true;};b.PreviewMouseLeftButtonUp+=(_,_)=>pressed=false;
@@ -273,6 +270,7 @@ internal sealed class StartMenuWindow : Window
         };
         return b;
     }
+    void RefreshCustomIcons(){if(Dispatcher.CheckAccess())Render();else Dispatcher.BeginInvoke(new Action(Render));}
     void Render()
     {
         pinnedView=false;body.Children.Clear();pinnedSections.Clear();pipDots.Clear();sectionPips.Children.Clear();scroll.ScrollToTop();if(data==null)return;

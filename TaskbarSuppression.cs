@@ -25,6 +25,7 @@ internal sealed class TaskbarSuppression:IDisposable
     [DllImport("user32.dll")]static extern uint GetRawInputData(IntPtr input,uint command,out RawKeyboard keyboard,ref uint size,uint headerSize);
     [DllImport("user32.dll")]static extern IntPtr SetWinEventHook(uint min,uint max,IntPtr module,ActiveApplication.EventProc callback,uint process,uint thread,uint flags);
     [DllImport("user32.dll")]static extern bool UnhookWinEvent(IntPtr hook);
+    [DllImport("user32.dll")]static extern IntPtr GetWindow(IntPtr window,uint command);
     [DllImport("dwmapi.dll")]static extern int DwmGetWindowAttribute(IntPtr window,int attribute,out int value,int size);
     readonly Window owner;readonly Preferences prefs;readonly HwndSource source;readonly uint recreated;readonly ActiveApplication.EventProc callback;readonly List<IntPtr> hooks=new();
     readonly List<SavedWindow> saved=new();readonly long started=Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks;
@@ -57,13 +58,21 @@ internal sealed class TaskbarSuppression:IDisposable
     internal void WindowsKeyPressed()
     {
         if(disposed||!prefs.BlockTaskbarEdgeReveal)return;
-        keyboardReveal=true;graceUntil=DateTime.UtcNow.AddSeconds(2);RestoreAll(false);
+        keyboardReveal=true;var requested=DateTime.UtcNow.AddSeconds(2);if(graceUntil<requested)graceUntil=requested;RestoreAll(false);
+    }
+    internal void RevealForInteraction()
+    {
+        if(disposed)return;
+        keyboardReveal=true;graceUntil=DateTime.UtcNow.AddSeconds(10);RestoreAll(false);
     }
     static bool NativeShellActive()
     {
-        var foreground=Native.GetForegroundWindow();if(Official(foreground)||Class(foreground)=="#32768")return true;
+        var foreground=Native.GetForegroundWindow();if(Official(foreground))return true;
+        var owner=GetWindow(foreground,4);for(int depth=0;owner!=IntPtr.Zero&&depth<12;depth++,owner=GetWindow(owner,4))if(Official(owner))return true;
         ApplicationIdentity.GetWindowThreadProcessId(foreground,out uint pid);
-        if(Path.GetFileName(ApplicationIdentity.ProcessInfo(pid).Path).Equals("StartMenuExperienceHost.exe",StringComparison.OrdinalIgnoreCase))return true;
+        string processPath=ApplicationIdentity.ProcessInfo(pid).Path;
+        if(Class(foreground) is "#32768" or "NotifyIconOverflowWindow" or "TopLevelWindowForOverflowXamlIsland" or "XamlExplorerHostIslandWindow"&&string.Equals(processPath,Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"explorer.exe"),StringComparison.OrdinalIgnoreCase))return true;
+        if(Path.GetFileName(processPath).Equals("StartMenuExperienceHost.exe",StringComparison.OrdinalIgnoreCase))return true;
         // Some Start versions activate a proxy: only visible, uncloaked Start-host windows count.
         bool start=false;Native.EnumWindows((window,_)=>{
             if(!Native.IsWindowVisible(window)||Class(window)!="Windows.UI.Core.CoreWindow"||DwmGetWindowAttribute(window,14,out int cloaked,4)==0&&cloaked!=0)return true;
@@ -81,7 +90,7 @@ internal sealed class TaskbarSuppression:IDisposable
             if(!guardianReady||guardian is {HasExited:true}){guardianReady=false;StartGuardian();return;}
             if(keyboardReveal)
             {
-                if(NativeShellActive())graceUntil=DateTime.UtcNow.AddSeconds(1);
+                if(NativeShellActive()&&graceUntil<DateTime.UtcNow.AddSeconds(1))graceUntil=DateTime.UtcNow.AddSeconds(1);
                 if(DateTime.UtcNow<graceUntil){RestoreAll(false);return;}
                 keyboardReveal=false;
             }

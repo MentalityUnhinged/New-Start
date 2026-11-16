@@ -10,23 +10,23 @@ The initial Adaptive AppBar is implemented with resting-only reservation, per-di
 
 ## Further application-bar integration
 
-The following earlier design notes include delivered foundation behaviour and remaining application-menu work. Universal application menu extraction and general Bluetooth connection adapters are not delivered by the current beta.
+The beta now also includes optional verified accessibility menu categories/commands, independent Start visibility, power telemetry, Sound media integration and restricted plugins. The following notes describe the broader direction; universal application menu extraction, cross-app notification-centre hosting and general Bluetooth connection adapters remain outside the delivered subset.
 
 - Add an optional top application/menu bar using New Start's Light/Dark/System, transparency, blur and menu styling. It is off by default.
-- When enabled, move the Start circle from the dock to the top bar, with only one Start entry point. Start opens beneath that control; preserve screen centring when the control/layout is centred.
+- Start buttons in Dock and AppBar now have independent visibility controls. Both can be hidden while retaining context-menu and Ctrl+Alt+S access; Windows Start remains available through its native key.
 - Restrict the dock to Bottom or Left while the bar is enabled. Retain left/centre/right alignment for Bottom and top/centre/bottom alignment for Left. If enabling from a Top dock, use Bottom/Centre. Remember the previous layout and restore it when the application bar is disabled.
-- Include a clock and system access such as sound/volume, Wi-Fi/network and notification centre, with appropriate status and settings controls. The initial implementation should open Windows' existing panels where supported; custom panels and cross-app notification access need separate API/permission research.
+- Retain native media/audio/Wi-Fi/Bluetooth controls and the centred clock. Broader notification-centre access needs separate API/permission research; the tray launcher uses Explorer's real area rather than fabricated icon hosting.
 - Reserve only the top bar's own occupied strip, alongside the dock's separate reservation. Maximised windows must respect both, with consistent clearance. Menus remain overlays. Keep fullscreen behaviour and Explorer fallback.
-- Show the active application and, where reliably exposed, its application menu commands. Keep application title bars intact. Do not strip or reparent other apps' title bars or assume every app supplies exportable menus.
+- Retain verified active-app/menu actions and optional safely reversible standard-frame management. Custom-drawn title bars and universal application menu export remain unsupported.
 - Research standard Win32 menus, accessibility-exposed MenuBar/Menu/MenuItem elements and explicit app integrations. Exposing a menu through accessibility does not constitute a universal global-menu protocol: verify discovery, invocation, dynamic items, keyboard access and focus per application/framework. Unsupported apps should retain their normal menus and receive a clear fallback rather than invented commands.
 
 Deliver in stages: bar/Start relocation and layout restrictions; clock and Windows system-panel access; then tested application-menu adapters. Validate enable/disable restoration, both dock edges, maximised/fullscreen windows, menu anchoring, focus/accessibility, DPI and multi-monitor behaviour before widening the beta.
 
 Research references: [Microsoft MenuBar control type](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-supportmenubarcontroltype), [Menu control type](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-supportmenucontroltype), and [notification area APIs](https://learn.microsoft.com/en-us/windows/win32/shell/notification-area). Accessibility menu support and notification-area APIs are separate capabilities; neither alone supplies a full macOS-style global menu or Windows notification-centre replacement.
 
-## Planned: dock and application-bar plugins
+## Plugin API 1 and future executable extensions
 
-An optional extension system will let users add their own dock items, application-bar indicators and menus. This is a future feature, not part of the current beta.
+The beta now includes restricted API 1: data-only external manifests, trusted compiled providers, permissions, lifecycle/configuration/diagnostics, both placements and an authorised Codex usage provider. See [the implemented contract](PLUGINS.md). The broader executable-plugin host, custom ordering/layout editor and credential-backed third-party providers below remain future work; arbitrary plugin code is not loaded by this version.
 
 - Support both dock and application-bar placements through one plugin API. Users choose where each plugin appears, its order, and whether it is enabled. A plugin must declare which surfaces it supports; dock-only use must not require enabling the application bar.
 - Initial examples include AI-usage menus showing provider-reported usage, remaining allowance and reset times, plus user-created status indicators, shortcuts and tools. Label unavailable, estimated or stale values clearly; do not imply that every AI provider exposes usage/quota data.
@@ -49,9 +49,9 @@ Add an optional window-preview pop-out when the pointer rests over a running app
 - Research native live-thumbnail support and its hosting requirements before selecting an implementation. Handle minimised, closed, protected and otherwise unavailable windows with an icon/title fallback; do not promise a live image in every case or persist window captures.
 - Validate window grouping, rapid window changes, activation, close/save prompts, keyboard access, all dock edges, display scaling and graphics/session performance. Only update previews while needed.
 
-## Planned: custom icons, including Start
+## Custom icons and future icon packs
 
-Allow users to replace icons in New Start, including the Start circle. This is a future feature, not included in the current beta.
+ICO and common raster overrides are now implemented with a dedicated picker, copied local assets, stable application identities, application-wide/Dock/AppBar scopes and restoration. Start is supported in both surfaces. See [current controls](INTERACTION-AND-CUSTOMISATION.md). Vector formats, portable theme/icon packs and the remaining broader controls described below are future work.
 
 - Provide icon overrides for individual pinned applications and built-in dock/application-bar controls, including Start. Overrides change New Start's presentation only, not Windows shortcuts or the application's own files.
 - Use the same custom Start icon wherever Start is currently placed: the dock or the optional application bar. Keep its full click target, accessible name, sizing and hover behaviour independent of transparent pixels in the image.
@@ -74,7 +74,7 @@ Assess supported alternatives for tray hosting, badges, task progress and previe
 
 ## Planned: optional Windows taskbar and Start suppression
 
-Add separate, explicit settings to **hide the Windows taskbar while New Start runs** and **use New Start instead of Windows Start**. Both remain off by default and are not implemented in the current beta. They should work with the dock alone or with the optional application bar.
+Optional, reversible pointer-reveal suppression for Explorer's taskbar is implemented with a verified recovery helper and native Windows-key access. New Start does not redirect the Windows key or disable Windows Start. Broader Start suppression and the additional recovery acceptance below remain future research; both shell components remain installed and available.
 
 - Research reversible taskbar suppression across primary/secondary displays and Explorer restarts. Hiding a window and releasing its reserved work area are separate requirements; verify both rather than assuming one implies the other.
 - Investigate redirecting standalone Windows-key and Ctrl+Esc activation to New Start, while preserving unrelated Windows-key shortcuts. Suppress normal Windows Start entry points only where reliably supported; do not promise a universal OS-level disable switch.

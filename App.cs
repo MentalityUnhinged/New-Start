@@ -8,6 +8,28 @@ public static class Program
 {
     [STAThread] public static void Main(string[] args)
     {
+        if(args.Length==1&&args[0]=="--verify-surfaces-isolated"){SurfaceValidation.Run();return;}
+        if(args.Length==1&&args[0]=="--verify-codex-usage"){try{CodexUsageValidation.Run().GetAwaiter().GetResult();}catch{Environment.ExitCode=1;}return;}
+        if(args.Length==1&&args[0]=="--verify-appbar-isolated"){DesktopValidation.Run();return;}
+        if(args.Length==1&&args[0]=="--development-preview"){DesktopValidation.Run(true);return;}
+        if(args.Length==2&&args[0]=="--dock-activation-fixture"&&Guid.TryParseExact(args[1],"N",out _)){DockActivationValidation.Fixture(args[1]);return;}
+        if(args.Length==1&&args[0]=="--verify-dock-activation")
+        {
+            var validation=new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};validation.Startup+=async(_,_)=>{try{await DockActivationValidation.Run();validation.Shutdown();}catch{validation.Shutdown(1);}};validation.Run();return;
+        }
+        if(args.Length==2&&args[0]=="--application-menu-fixture"&&Guid.TryParseExact(args[1],"N",out _)){ApplicationMenuValidation.Fixture(args[1]);return;}
+        if(args.Length==1&&args[0]=="--verify-application-menus")
+        {
+            var validation=new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};validation.Startup+=async(_,_)=>{try{await ApplicationMenuValidation.Run();validation.Shutdown();}catch{validation.Shutdown(1);}};validation.Run();return;
+        }
+        if(args.Length==1&&args[0]=="--verify-interactions")
+        {
+            var validation=new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};InteractionValidation.Run();return;
+        }
+        if(args.Length==1&&args[0]=="--verify-development")
+        {
+            var validation=new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};DevelopmentValidation.Run();return;
+        }
         if(args.Length==4&&args[0]=="--taskbar-guardian"&&int.TryParse(args[1],out int taskbarOwner)&&long.TryParse(args[2],out long taskbarStarted)){TaskbarSuppression.Guard(taskbarOwner,taskbarStarted,args[3]);return;}
         if(args.Length==2&&args[0]=="--taskbar-suppression-crash-test"&&Guid.TryParseExact(args[1],"N",out _))
         {
@@ -28,6 +50,7 @@ public static class Program
         if(args.Length==3&&args[0]=="--borderless-guardian"&&int.TryParse(args[1],out int parent)&&long.TryParse(args[2],out long started)){BorderlessManager.Guard(parent,started);return;}
         using var single = new Mutex(true, "NewStart.User." + Environment.UserName, out bool first);
         if (!first) return;
+        ScrollPolicy.Install();
         BorderlessManager.Recover();
         TaskbarSuppression.Recover();
         if(args.Length==1&&args[0]=="--verify-taskbar-suppression")

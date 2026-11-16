@@ -27,3 +27,6 @@ palette-fixture-*.png
 
 taskbar-recovery.json
 taskbar-test-*.json
+CustomIcons/
+Plugins/
+plugins-state.json

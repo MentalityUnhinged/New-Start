@@ -18,13 +18,13 @@ internal static class ThemedMenus
     static IntPtr popupBackdrop;static ContextMenu? activeMenu;
     internal static long PositionUpdates {get;private set;}
     static ResourceDictionary? styles;
-    internal static ContextMenu Create(Preferences prefs)
+    internal static ContextMenu Create(Preferences prefs,Func<Preferences>? current=null)
     {
-        var menu=new ContextMenu{MinWidth=210,MaxWidth=460,FontFamily=new FontFamily("Segoe UI Variable, Segoe UI"),FontSize=13,HasDropShadow=false};
+        var menu=new ContextMenu{MinWidth=180,MaxWidth=460,MaxHeight=Math.Max(160,SystemParameters.WorkArea.Height-48),FontFamily=new FontFamily("Segoe UI Variable, Segoe UI"),FontSize=13,HasDropShadow=false};
         menu.Resources.MergedDictionaries.Add(styles??=(ResourceDictionary)XamlReader.Parse("""
         <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-          <Style TargetType="ContextMenu"><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ContextMenu"><Border CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource MenuOutline}" Background="{DynamicResource MenuSurface}" Padding="5"><StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/></Border></ControlTemplate></Setter.Value></Setter></Style>
-          <Style TargetType="MenuItem"><Setter Property="Foreground" Value="{DynamicResource MenuText}"/><Setter Property="Padding" Value="10,8"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="MenuItem">
+          <Style TargetType="ContextMenu"><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ContextMenu"><Border CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource MenuOutline}" Background="{DynamicResource MenuSurface}" Padding="5"><ScrollViewer CanContentScroll="False" VerticalScrollBarVisibility="Hidden"><StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/></ScrollViewer></Border></ControlTemplate></Setter.Value></Setter></Style>
+          <Style TargetType="MenuItem"><Setter Property="Foreground" Value="{DynamicResource MenuText}"/><Setter Property="Padding" Value="{DynamicResource MenuPadding}"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="MenuItem">
             <Border x:Name="Row" Background="Transparent" CornerRadius="4" Margin="0,1" Padding="{TemplateBinding Padding}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><ContentPresenter ContentSource="Icon" Width="16" Height="16" VerticalAlignment="Center" HorizontalAlignment="Left"/><ContentPresenter Grid.Column="1" ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center"/><TextBlock Grid.Column="2" Text="{TemplateBinding InputGestureText}" Margin="18,0,2,0" Opacity="0.65" VerticalAlignment="Center"/></Grid></Border>
             <ControlTemplate.Triggers><Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Row" Property="Background" Value="{DynamicResource MenuHover}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger></ControlTemplate.Triggers>
           </ControlTemplate></Setter.Value></Setter></Style>
@@ -44,7 +44,7 @@ internal static class ThemedMenus
         IntPtr PositionChanged(IntPtr hwnd,int message,IntPtr wParam,IntPtr lParam,ref bool handled){if(message==0x0047)FollowPopup(null,EventArgs.Empty);return IntPtr.Zero;}
         void Release(){lastPosition=default;if(popupSource!=null){popupSource.RemoveHook(PositionChanged);popupSource=null;}if(activeMenu==menu){if(popupBackdrop!=IntPtr.Zero)UpdateBackdrop(popupBackdrop,0,false);activeMenu=null;}}
         menu.Opened+=(_,_)=>{
-            Release();bool dark=Appearance.IsDark(prefs.Theme);bool effects=NativeBackdrop.TransparencyAllowed();
+            prefs=current?.Invoke()??prefs;if(activeMenu!=null&&activeMenu!=menu)activeMenu.IsOpen=false;menu.Resources["MenuPadding"]=UiMetrics.MenuPadding(prefs);UiMetrics.Fade(menu,prefs.MenuAnimationMilliseconds);Release();bool dark=Appearance.IsDark(prefs.Theme);bool effects=NativeBackdrop.TransparencyAllowed()&&prefs.StartTransparency>0&&prefs.StartTransparency<1&&prefs.MenuBlur>0;
             var text=SystemParameters.HighContrast?SystemColors.MenuTextBrush:new SolidColorBrush(dark?Color.FromRgb(245,245,245):Color.FromRgb(25,25,25));
             menu.Foreground=text;menu.Resources["MenuText"]=text;
             menu.Resources["MenuOutline"]=new SolidColorBrush(dark?Color.FromArgb(80,160,160,160):Color.FromArgb(70,80,80,80));
@@ -55,9 +55,10 @@ internal static class ThemedMenus
                 catch(DllNotFoundException){Release();effects=false;}catch(EntryPointNotFoundException){Release();effects=false;}
             }
             else effects=false;
+            activeMenu=menu;
             if(effects&&PresentationSource.FromVisual(menu) is HwndSource popup){popupSource=popup;popup.AddHook(PositionChanged);}
-            byte alpha=effects?(byte)Math.Max(1,Math.Round(255*(1-prefs.StartTransparency))):(byte)255;
-            menu.Resources["MenuSurface"]=SystemParameters.HighContrast?SystemColors.MenuBrush:new SolidColorBrush(dark?Color.FromArgb(alpha,35,35,35):Color.FromArgb(alpha,243,243,243));
+            byte alpha=(byte)Math.Clamp(Math.Round(255*(1-prefs.StartTransparency)),0,255);var tint=prefs.SurfaceColour??(dark?Color.FromRgb(35,35,35):Color.FromRgb(243,243,243));
+            menu.Resources["MenuSurface"]=SystemParameters.HighContrast?SystemColors.MenuBrush:new SolidColorBrush(Color.FromArgb(alpha,tint.R,tint.G,tint.B));
             foreach(var item in menu.Items)if(item is MenuItem entry&&entry.Icon==null)
             {
                 string label=entry.Header?.ToString()??"";

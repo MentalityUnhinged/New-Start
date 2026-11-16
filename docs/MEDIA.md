@@ -1,0 +1,11 @@
+# System media sessions
+
+`AppBarMedia` keeps the existing Windows System Media Transport Controls integration and now subscribes to media, playback and timeline events for each live session. Session removal, selection changes and disposal unsubscribe all three event types. Unavailable services and disappearing sessions clear stale information rather than leaving the previous application's track visible.
+
+The AppBar uses cached `Timeline` and `Source` values; it should not call a provider's timeline/source getters directly while constructing WPF controls. Timeline capture is guarded because applications can stop exposing their session at any time. No permanent position polling is added. Artwork remains optional, bounded to 8 MB, decoded to a compact frozen image and protected against stale asynchronous responses.
+
+`Seek(TimeSpan)` checks the session's current playback-position capability and intersects its reported seek bounds with the media item's duration. It sends the resulting 100-nanosecond ticks through `TryChangePlaybackPositionAsync`. Unknown or invalid ranges disable seeking, and rejected commands produce feedback. Play, pause, previous and next likewise check the session's reported controls; unknown command names do not trigger playback accidentally. Commands remain targeted to the captured session, and delayed responses cannot overwrite another selected session's state.
+
+`MediaValidation.Run` covers seek-bound clamping, tick precision, unavailable and invalid timelines, and the intersection of live seek ranges with item duration. Live playback, remote-provider rejection, session switching and artwork require desktop acceptance; validation does not start playback or send commands to personal media sessions.
+
+Primary references: [session capabilities and events](https://learn.microsoft.com/en-us/uwp/api/windows.media.control.globalsystemmediatransportcontrolssession), [timeline properties](https://learn.microsoft.com/en-us/uwp/api/windows.media.control.globalsystemmediatransportcontrolssessiontimelineproperties), [playback-position requests](https://learn.microsoft.com/en-us/uwp/api/windows.media.control.globalsystemmediatransportcontrolssession.trychangeplaybackpositionasync).

@@ -45,6 +45,22 @@ public sealed class Preferences
     public string AppBarWallpaperFallback {get;set;}="#000000";
     internal System.Windows.Media.Color? SurfaceColour {get;set;}
     public bool AppBarEnabled {get;set;}
+    public bool ShowAppBarStart {get;set;}=true;
+    public bool? ShowDockStart {get;set;}
+    public bool AppBarApplicationMenu {get;set;}
+    public bool DockTaskTray {get;set;}
+    public bool AppBarTaskTray {get;set;}
+    public bool AdvancedSettings {get;set;}
+    public int MenuDensity {get;set;}
+    public double ScrollMultiplier {get;set;}=1;
+    public int MenuAnimationMilliseconds {get;set;}=120;
+    public int AppBarHeight {get;set;}=36;
+    public int AppBarPadding {get;set;}=8;
+    public int AppBarCornerRadius {get;set;}=16;
+    public int AppBarExpansionWidth {get;set;}=440;
+    public int DockIconSpacing {get;set;}=0;
+    public int DockRemovalThreshold {get;set;}=48;
+    public bool DockDragging {get;set;}=true;
     public double? AppBarTransparency {get;set;}
     public double? AppBarBlur {get;set;}
     public bool AppBarAllMonitors {get;set;}=true;
@@ -78,7 +94,8 @@ public sealed class Preferences
     public bool Indicators { get; set; } = true;
     public List<string> Pins { get; set; } = new();
     public List<string> DockPinOrder {get;set;}=new();
-    public static string Folder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NewStart");
+    internal static string? StorageOverride {get;set;} // Isolated validation only; never populated by normal startup.
+    public static string Folder => StorageOverride??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NewStart");
     public static void MigrateLegacy()
     {
         string legacy=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"MinimalDock");
@@ -104,6 +121,11 @@ public sealed class Preferences
         static List<string> Paths(List<string>? values)=>(values??new()).Where(value=>!string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         Magnification=Number(Magnification,1,1.75,1.25,2);IconSize=Number(IconSize,16,64,36);
         Theme=Math.Clamp(Theme,0,2);Clock=Math.Clamp(Clock,0,2);
+        ShowDockStart??=!AppBarEnabled; // Preserve legacy placement once, then operate independently.
+        MenuDensity=Math.Clamp(MenuDensity,0,1);ScrollMultiplier=Number(ScrollMultiplier,.25,3,1,2);
+        MenuAnimationMilliseconds=Math.Clamp(MenuAnimationMilliseconds,0,400);AppBarHeight=Math.Clamp(AppBarHeight,28,56);
+        AppBarPadding=Math.Clamp(AppBarPadding,2,20);AppBarCornerRadius=Math.Clamp(AppBarCornerRadius,0,28);AppBarExpansionWidth=Math.Clamp(AppBarExpansionWidth,300,640);
+        DockIconSpacing=Math.Clamp(DockIconSpacing,0,20);DockRemovalThreshold=Math.Clamp(DockRemovalThreshold,24,160);
         StartTransparency=Number(StartTransparency,0,1,.8,2);MenuBlur=Number(MenuBlur,0,60,16,2);
         DockColourSource=Math.Clamp(DockColourSource,0,3);AppBarColourSource=Math.Clamp(AppBarColourSource,0,3);
         DockWallpaperStrategy=Math.Clamp(DockWallpaperStrategy,0,1);AppBarWallpaperStrategy=Math.Clamp(AppBarWallpaperStrategy,0,1);

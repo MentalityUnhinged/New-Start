@@ -15,7 +15,7 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 
 namespace NewStart;
-internal enum AppBarSection { None,Media,Audio,Network,Bluetooth,Clock,Application,Settings,Start }
+internal enum AppBarSection { None,Media,Audio,Network,Bluetooth,Clock,Application,Settings,Start,Power,Plugin }
 internal sealed class AdaptiveAppBars:IDisposable
 {
     readonly DockWindow dock;internal readonly Preferences Preferences;
@@ -27,10 +27,13 @@ internal sealed class AdaptiveAppBars:IDisposable
     internal readonly AppBarNetwork Network;
     internal readonly AppBarBluetooth Bluetooth;
     internal readonly ApplicationCapabilities Capabilities;
+    internal readonly AppBarPower Power;
+    internal PluginManager Plugins=>dock.Plugins;
     internal IEnumerable<AdaptiveAppBarWindow> Windows=>bars.Values;
     internal AdaptiveAppBars(DockWindow host,Preferences prefs)
     {
         dock=host;Preferences=prefs;Applications=new(host.Dispatcher);Borderless=new(prefs,Applications);Audio=new(host.Dispatcher);Media=new(host.Dispatcher);Network=new(host.Dispatcher);Bluetooth=new(host.Dispatcher);Capabilities=new(Applications,Media,host.Dispatcher);
+        Power=new(host.Dispatcher);Plugins.Changed+=PluginsChanged;
         SystemEvents.DisplaySettingsChanged+=DisplaysChanged;SystemEvents.UserPreferenceChanged+=UserPreferenceChanged;
         try{Reconcile();Borderless.Update();}catch{Dispose();throw;}
     }
@@ -62,19 +65,26 @@ internal sealed class AdaptiveAppBars:IDisposable
     internal FrameworkElement SettingsContents(Window owner,Action dismiss,out Action release)=>dock.SettingsContents(owner,dismiss,true,out release);
     internal FrameworkElement StartContents(double width,double height,Action dismiss,out Action release)=>dock.EmbeddedStartContents(width,height,dismiss,out release);
     internal bool FocusStart()=>dock.FocusEmbeddedStart();
+    internal void CollapseAll(){foreach(var bar in bars.Values)bar.Collapse(false);}
+    internal bool OpenStartFallback(){var bar=bars.Values.FirstOrDefault(item=>item.Display.Handle==DesktopDisplays.MonitorFromWindow(Native.GetForegroundWindow(),2))??bars.Values.FirstOrDefault();if(bar==null)return false;bar.Toggle(AppBarSection.Start);return true;}
+    internal void OpenCategory(string category){dock.SettingsCategory(category);}
+    internal void RevealTray()=>dock.RevealTray();
+    void PluginsChanged(){foreach(var bar in bars.Values)bar.RefreshEnhancements();}
+    internal void RefreshIcons(){foreach(var bar in bars.Values){bar.InvalidateIcons();bar.RefreshEnhancements();}}
     public void Dispose()
     {
         if(disposed)return;disposed=true;SystemEvents.DisplaySettingsChanged-=DisplaysChanged;SystemEvents.UserPreferenceChanged-=UserPreferenceChanged;
-        foreach(var bar in bars.Values.ToArray())bar.Close();bars.Clear();Capabilities.Dispose();Borderless.Dispose();Applications.Dispose();Audio.Dispose();Media.Dispose();Network.Dispose();Bluetooth.Dispose();
+        Plugins.Changed-=PluginsChanged;foreach(var bar in bars.Values.ToArray())bar.Close();bars.Clear();Power.Dispose();Capabilities.Dispose();Borderless.Dispose();Applications.Dispose();Audio.Dispose();Media.Dispose();Network.Dispose();Bluetooth.Dispose();
     }
 }
 
-internal sealed class AdaptiveAppBarWindow:Window
+internal sealed partial class AdaptiveAppBarWindow:Window
 {
     internal const double RestHeight=36;
+    double BarHeight=>Prefs.AppBarHeight;
     readonly AdaptiveAppBars host;Preferences Prefs=>host.Preferences;
     internal DesktopDisplay Display;
-    readonly Grid root=new(),header=new();readonly StackPanel body=new(){Margin=new Thickness(16,12,16,14)};
+    readonly Grid root=new(),header=new();readonly StackPanel body=new(){Margin=new Thickness(12,8,12,10)};
     readonly ScrollViewer bodyScroll=new(){VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
     readonly Border bodyHit=new(){Background=Brushes.Transparent,HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Top,ClipToBounds=true};
     readonly AppBarMaterial material=new();
@@ -105,7 +115,7 @@ internal sealed class AdaptiveAppBarWindow:Window
     bool hoverExpansion,focusStartPending,settingsFitQueued,showAllActions;Action? releaseContent;
     internal AppBarSection Section=>current;
     internal bool Testing {get;set;}
-    internal double ReservedHeight=>RestHeight;
+    internal double ReservedHeight=>BarHeight;
     internal long SurfaceUpdates {get;private set;}
     internal long Repositions {get;private set;}
     internal bool BlurVisible=>material.NativeVisible;
@@ -117,7 +127,7 @@ internal sealed class AdaptiveAppBarWindow:Window
         {
             if(material.Surface.Data is not Geometry outline||outline.GetFlattenedPathGeometry().Figures.Count!=1)return false;
             if(!material.NativeVisible)return true;
-            double y=RestHeight+(ActualHeight-RestHeight)/2;
+            double y=BarHeight+(ActualHeight-BarHeight)/2;
             for(int i=0;i<24;i++){var point=new Point(ActualWidth*(i+.5)/24,y);if(outline.FillContains(point)!=material.NativeContains(point))return false;}
             return material.NativeContains(new Point(ActualWidth/2,RestHeight/2));
         }
@@ -126,9 +136,9 @@ internal sealed class AdaptiveAppBarWindow:Window
     internal DockReservation.Rect ReservedBounds=>reservation?.Bounds??default;
     internal AdaptiveAppBarWindow(AdaptiveAppBars owner,DesktopDisplay display)
     {
-        host=owner;Display=display;Title="New Start Adaptive AppBar (Beta)";WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;AllowsTransparency=true;Background=Brushes.Transparent;Topmost=true;ShowInTaskbar=false;ShowActivated=false;Height=RestHeight;Width=600;
+        host=owner;Display=display;Title="New Start Adaptive AppBar (Beta)";WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;AllowsTransparency=true;Background=Brushes.Transparent;Topmost=true;ShowInTaskbar=false;ShowActivated=false;Height=BarHeight;Width=600;
         Content=root;root.Children.Add(material.Surface);root.Children.Add(bodyHit);root.Children.Add(header);
-        header.Height=RestHeight;header.VerticalAlignment=VerticalAlignment.Top;header.Background=new SolidColorBrush(Color.FromArgb(1,0,0,0));header.Margin=new Thickness(8,0,8,0);
+        header.Height=BarHeight;header.VerticalAlignment=VerticalAlignment.Top;header.Background=new SolidColorBrush(Color.FromArgb(1,0,0,0));header.Margin=new Thickness(8,0,8,0);
         header.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});header.ColumnDefinitions.Add(new ColumnDefinition());header.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
         var left=new StackPanel{Orientation=Orientation.Horizontal};header.Children.Add(left);
         var start=Compact(new Ellipse{Width=16,Height=16,StrokeThickness=1.5},"Start",()=>host.OpenStart(this,(FrameworkElement)left.Children[0]));
@@ -146,13 +156,14 @@ internal sealed class AdaptiveAppBarWindow:Window
         clock=Compact("", "Clock",()=>Toggle(AppBarSection.Clock));clock.HorizontalAlignment=HorizontalAlignment.Center;Grid.SetColumnSpan(clock,3);header.Children.Add(clock);buttons[AppBarSection.Clock]=clock;
         var settings=Compact("\uE713","New Start settings",()=>Toggle(AppBarSection.Settings),true);right.Children.Add(settings);buttons[AppBarSection.Settings]=settings;right.Children.Add(windowControls);
         bodyHit.Background=new SolidColorBrush(Color.FromArgb(1,0,0,0));bodyScroll.Content=body;bodyHit.Child=bodyScroll;bodyHit.Visibility=Visibility.Collapsed;
+        InitialiseEnhancements(left,right,start,appButton);
         MouseLeave+=(_,_)=>{if(hoverExpansion)leaveTimer.Start();};MouseEnter+=(_,_)=>leaveTimer.Stop();
         bodyHit.MouseLeave+=(_,_)=>{if(hoverExpansion)leaveTimer.Start();};bodyHit.MouseEnter+=(_,_)=>leaveTimer.Stop();
         leaveTimer.Tick+=(_,_)=>{leaveTimer.Stop();if(hoverExpansion&&!IsMouseOver){if(Mouse.LeftButton==MouseButtonState.Pressed)leaveTimer.Start();else Collapse();}};
         hoverTimer.Tick+=(_,_)=>{hoverTimer.Stop();if(media.IsMouseOver&&current==AppBarSection.None)Expand(AppBarSection.Media,true);};
         PreviewKeyDown+=(_,e)=>{if(e.Key==Key.Escape){Collapse();e.Handled=true;}};
         Deactivated+=(_,_)=>Dispatcher.BeginInvoke(new Action(()=>{
-            if(closing||Testing||current==AppBarSection.None)return;
+            if(closing||Testing||current==AppBarSection.None||host.Capabilities.MenuTransition)return;
             var foreground=Native.GetForegroundWindow();var own=new WindowInteropHelper(this).Handle;
             if(foreground!=IntPtr.Zero&&foreground!=own&&!IsOwnedBy(foreground,own))Collapse();
         }),DispatcherPriority.Input);
@@ -176,12 +187,12 @@ internal sealed class AdaptiveAppBarWindow:Window
     IntPtr Hook(IntPtr hwnd,int message,IntPtr wParam,IntPtr lParam,ref bool handled)
     {
         if(message==0x007E||message==0x02E0){Collapse(false);host.QueueDisplays();}
-        if(message==0x0218)UpdateBattery();
+        if(message==0x0218){UpdateBattery();_=host.Power.RefreshAsync();}
         return IntPtr.Zero;
     }
     Button Compact(object content,string name,Action action,bool glyph=false)
     {
-        var button=new Button{Content=glyph?new TextBlock{Text=content.ToString(),FontFamily=new FontFamily("Segoe Fluent Icons"),FontSize=15}:content,Height=RestHeight,MinWidth=34,Padding=new Thickness(8,0,8,0),ToolTip=name,VerticalAlignment=VerticalAlignment.Top};
+        var button=new Button{Content=glyph?new TextBlock{Text=content.ToString(),FontFamily=new FontFamily("Segoe Fluent Icons"),FontSize=15}:content,Height=BarHeight,MinWidth=34,Padding=new Thickness(8,0,8,0),ToolTip=name,VerticalAlignment=VerticalAlignment.Top};
         StartMenuWindow.Borderless(button);System.Windows.Automation.AutomationProperties.SetName(button,name);button.Click+=(_,_)=>action();return button;
     }
     Button SectionButton(Panel parent,AppBarSection section,string glyph,string name)
@@ -196,11 +207,11 @@ internal sealed class AdaptiveAppBarWindow:Window
             // Move to the display before measuring its actual per-window DPI.
             DesktopDisplays.SetWindowPos(hwnd,IntPtr.Zero,Display.Bounds.Left,Display.Bounds.Top,0,0,0x0015);
             double scale=Math.Max(1,DesktopDisplays.GetDpiForWindow(hwnd))/96d;
-            reservation?.Update(true,RestHeight,DockEdge.Top);var bounds=reservation?.Bounds??default;
-            if(bounds.Right<=bounds.Left){bounds=new(){Left=Display.Bounds.Left,Top=Display.Bounds.Top,Right=Display.Bounds.Right,Bottom=Display.Bounds.Top+(int)Math.Ceiling(RestHeight*scale)};}
+            reservation?.Update(true,BarHeight,DockEdge.Top);var bounds=reservation?.Bounds??default;
+            if(bounds.Right<=bounds.Left){bounds=new(){Left=Display.Bounds.Left,Top=Display.Bounds.Top,Right=Display.Bounds.Right,Bottom=Display.Bounds.Top+(int)Math.Ceiling(BarHeight*scale)};}
             Width=(bounds.Right-bounds.Left)/scale;
             DesktopDisplays.SetWindowPos(hwnd,IntPtr.Zero,bounds.Left,bounds.Top,bounds.Right-bounds.Left,(int)Math.Ceiling(Height*scale),0x0014);
-            expandedWidth=Math.Min(440,Math.Max(100,Width-16));UpdateSurface();
+            expandedWidth=Math.Min(current==AppBarSection.Start?680:current==AppBarSection.Settings?580:Prefs.AppBarExpansionWidth,Math.Max(100,Width-16));if(current!=AppBarSection.None)Morph(LobeWidthProperty,expandedWidth,false);UpdateSurface();
         }
         finally{repositioning=false;}
     }
@@ -212,23 +223,24 @@ internal sealed class AdaptiveAppBarWindow:Window
         surfacePrefs.Theme=Prefs.Theme;surfacePrefs.MenuBlur=Prefs.AppBarBlur??Prefs.MenuBlur;surfacePrefs.StartTransparency=Prefs.AppBarTransparency??Prefs.StartTransparency;
         surfacePrefs.SurfaceColour=SurfaceAppearance.Background(Prefs,true,Display.Name);
         var hit=surfacePrefs.SurfaceColour.Value;header.Background=new SolidColorBrush(Color.FromArgb(1,hit.R,hit.G,hit.B));bodyHit.Background=header.Background;
+        RefreshEnhancements();
         UpdateSurface();
     }
     void UpdateSurface()
     {
         SurfaceUpdates++;
         if(!IsLoaded||closing)return;
-        application.MaxWidth=Math.Clamp(ActualWidth-540,0,260);
+        FitHeader();
         windowControls.Visibility=ActualWidth<720?Visibility.Collapsed:Visibility.Visible;
-        media.Visibility=ActualWidth<500?Visibility.Collapsed:Visibility.Visible;
-        double extra=Math.Max(0,ActualHeight-RestHeight);
+        media.Visibility=ActualWidth<500||host.Media.Selected==null?Visibility.Collapsed:Visibility.Visible;
+        double extra=Math.Max(0,ActualHeight-BarHeight);
         double width=Math.Max(1,ActualWidth),lobeWidth=Math.Min(expandedWidth,(double)GetValue(LobeWidthProperty));
         double left=Math.Clamp((double)GetValue(LobeCentreProperty)-lobeWidth/2,8,Math.Max(8,width-lobeWidth-8));
-        double shoulder=Math.Max(0,Math.Min(16,Math.Min(extra/2,Math.Min(left,width-left-lobeWidth))));
-        double radius=Math.Min(16,Math.Min(extra/2,lobeWidth/2));
-        material.Update(this,surfacePrefs,new AppBarOutline(width,RestHeight,left,lobeWidth,extra,shoulder,radius));
+        double shoulder=Math.Max(0,Math.Min(Prefs.AppBarCornerRadius,Math.Min(extra/2,Math.Min(left,width-left-lobeWidth))));
+        double radius=Math.Min(Prefs.AppBarCornerRadius,Math.Min(extra/2,lobeWidth/2));
+        material.Update(this,surfacePrefs,new AppBarOutline(width,BarHeight,left,lobeWidth,extra,shoulder,radius));
         if(extra<1){bodyHit.Visibility=Visibility.Collapsed;bodyScroll.Opacity=0;return;}
-        bodyHit.Visibility=Visibility.Visible;bodyHit.Width=lobeWidth;bodyHit.Height=extra;bodyHit.Margin=new Thickness(left,RestHeight,0,0);
+        bodyHit.Visibility=Visibility.Visible;bodyHit.Width=lobeWidth;bodyHit.Height=extra;bodyHit.Margin=new Thickness(left,BarHeight,0,0);
         bodyScroll.Width=expandedWidth;bodyScroll.HorizontalAlignment=HorizontalAlignment.Center;
         bodyScroll.Opacity=Math.Clamp((extra/Math.Max(1,targetExtra)-.3)/.7,0,1);
         if(focusStartPending&&current==AppBarSection.Start&&extra>24)focusStartPending=!host.FocusStart();
@@ -241,7 +253,7 @@ internal sealed class AdaptiveAppBarWindow:Window
     }
     void AnimateHeight(double height,bool animate=true)
     {
-        if(height>RestHeight)targetExtra=height-RestHeight;
+        if(height>BarHeight)targetExtra=height-BarHeight;
         int version=++animationGeneration;
         double from=ActualHeight;BeginAnimation(HeightProperty,null);Height=height;
         if(animate&&Prefs.AppBarAnimations&&SystemParameters.ClientAreaAnimation&&Prefs.AppBarAnimationMilliseconds>0)
@@ -254,13 +266,13 @@ internal sealed class AdaptiveAppBarWindow:Window
     internal void Toggle(AppBarSection section){Activate();if(current==section){if(hoverExpansion){hoverExpansion=false;leaveTimer.Stop();}else Collapse();}else Expand(section);}
     internal void Expand(AppBarSection section,bool fromHover=false)
     {
-        bool opening=current==AppBarSection.None&&ActualHeight<=RestHeight+1;
+        bool opening=current==AppBarSection.None&&ActualHeight<=BarHeight+1;
         host.CollapseOthers(this);hoverTimer.Stop();leaveTimer.Stop();current=section;hoverExpansion=fromHover;
-        expandedWidth=Math.Min(section==AppBarSection.Start?680:section==AppBarSection.Settings?580:440,Math.Max(100,ActualWidth-16));
+        expandedWidth=Math.Min(section==AppBarSection.Start?680:section==AppBarSection.Settings?580:Prefs.AppBarExpansionWidth,Math.Max(100,ActualWidth-16));
         double anchor=ActualWidth/2;
-        if(buttons.TryGetValue(section,out var button))anchor=button.TranslatePoint(new Point(button.ActualWidth/2,0),this).X;
+        if(buttons.TryGetValue(section,out var button)&&button.IsVisible)anchor=button.TranslatePoint(new Point(button.ActualWidth/2,0),this).X;
         Morph(LobeCentreProperty,anchor,!opening);
-        BuildBody();Morph(LobeWidthProperty,expandedWidth,true);FitExpansion();UpdateSurface();
+        BuildBody(false);Morph(LobeWidthProperty,expandedWidth,true);FitExpansion();UpdateSurface();
         if(section==AppBarSection.Network)_=host.Network.Refresh(true);
     }
     void FitExpansion()
@@ -268,41 +280,32 @@ internal sealed class AdaptiveAppBarWindow:Window
         if(current==AppBarSection.None)return;
         double limit=current switch{AppBarSection.Start=>740,AppBarSection.Settings=>620,AppBarSection.Media=>220,AppBarSection.Audio=>300,AppBarSection.Application=>380,_=>300};
         body.Measure(new Size(expandedWidth,double.PositiveInfinity));double target=Math.Clamp(Math.Ceiling(body.DesiredSize.Height)+4,44,limit);
-        double scale=VisualTreeHelper.GetDpi(this).DpiScaleY;double maximum=(Display.Bounds.Bottom-Display.Bounds.Top)/scale-RestHeight-24;
-        double height=RestHeight+Math.Max(40,Math.Min(target,maximum));if(Math.Abs(Height-height)>.5)AnimateHeight(height);
+        double scale=VisualTreeHelper.GetDpi(this).DpiScaleY;double maximum=(Display.Bounds.Bottom-Display.Bounds.Top)/scale-BarHeight-24;
+        double height=BarHeight+Math.Max(40,Math.Min(target,maximum));if(Math.Abs((double)GetAnimationBaseValue(HeightProperty)-height)>.5)AnimateHeight(height);
     }
     internal void RefitSettings()
     {
         if(closing||current!=AppBarSection.Settings||settingsFitQueued)return;settingsFitQueued=true;
         Dispatcher.BeginInvoke(new Action(()=>{settingsFitQueued=false;if(!closing&&current==AppBarSection.Settings){body.InvalidateMeasure();FitExpansion();}}),DispatcherPriority.ContextIdle);
     }
-    internal void Collapse(bool animate=true){if(current==AppBarSection.None&&Height==RestHeight)return;current=AppBarSection.None;hoverExpansion=false;focusStartPending=false;hoverTimer.Stop();leaveTimer.Stop();Morph(LobeWidthProperty,44,animate);AnimateHeight(RestHeight,animate);if(!animate||!Prefs.AppBarAnimations||!SystemParameters.ClientAreaAnimation||Prefs.AppBarAnimationMilliseconds==0)ClearBody();}
+    internal void Collapse(bool animate=true){if(current==AppBarSection.None&&Height==BarHeight)return;current=AppBarSection.None;hoverExpansion=false;focusStartPending=false;hoverTimer.Stop();leaveTimer.Stop();Morph(LobeWidthProperty,44,animate);AnimateHeight(BarHeight,animate);if(!animate||!Prefs.AppBarAnimations||!SystemParameters.ClientAreaAnimation||Prefs.AppBarAnimationMilliseconds==0)ClearBody();}
     void ClearBody(){body.Children.Clear();var release=releaseContent;releaseContent=null;release?.Invoke();}
     void Text(string value,double size=13){body.Children.Add(new TextBlock{Text=value,FontSize=size,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,8)});}
-    Button Action(string label,Action action,Panel? parent=null,bool enabled=true){var button=new Button{Content=label,IsEnabled=enabled,Margin=new Thickness(0,0,6,6),Padding=new Thickness(10,6,10,6)};button.Click+=(_,_)=>action();(parent??body).Children.Add(button);return button;}
+    Button Action(string label,Action action,Panel? parent=null,bool enabled=true){var button=new Button{Content=label,IsEnabled=enabled,Margin=new Thickness(0,0,UiMetrics.Gap,UiMetrics.Gap),Padding=UiMetrics.MenuPadding(Prefs)};button.Click+=(_,_)=>action();(parent??body).Children.Add(button);return button;}
     internal static void Open(string uri){try{Process.Start(new ProcessStartInfo(uri){UseShellExecute=true});}catch(Exception e){MessageBox.Show(e.Message,"New Start");}}
-    void BuildBody()
+    void BuildBody(bool refit=true)
     {
         ClearBody();volumeSlider=null;muteButton=null;audioStatus=null;networkStatus=null;
         switch(current)
         {
+            case AppBarSection.Power:body.Children.Add(host.Power.BuildContent());_=host.Power.RefreshAsync();break;
+            case AppBarSection.Plugin:if(selectedPlugin!=null)body.Children.Add(host.Plugins.BuildPanel(selectedPlugin));break;
             case AppBarSection.Settings:
                 body.Children.Add(host.SettingsContents(this,()=>Collapse(),out releaseContent));break;
             case AppBarSection.Start:
-                double available=(Display.Bounds.Bottom-Display.Bounds.Top)/VisualTreeHelper.GetDpi(this).DpiScaleY-RestHeight-64;
+                double available=(Display.Bounds.Bottom-Display.Bounds.Top)/VisualTreeHelper.GetDpi(this).DpiScaleY-BarHeight-64;
                 body.Children.Add(host.StartContents(expandedWidth-32,Math.Min(660,Math.Max(180,available)),()=>Collapse(),out releaseContent));focusStartPending=true;break;
-            case AppBarSection.Media:
-                var media=host.Media;
-                var row=new StackPanel{Orientation=Orientation.Horizontal};body.Children.Add(row);
-                if(media.Artwork!=null)row.Children.Add(new Image{Source=media.Artwork,Width=56,Height=56,Margin=new Thickness(0,0,12,8)});
-                else row.Children.Add(new TextBlock{Text="\uE8D6",FontFamily=new FontFamily("Segoe Fluent Icons"),FontSize=32,Width=56,Margin=new Thickness(0,0,12,8)});
-                row.Children.Add(new TextBlock{Text=media.Title+"\n"+media.Artist,TextWrapping=TextWrapping.Wrap,MaxWidth=Math.Max(80,expandedWidth-120),VerticalAlignment=VerticalAlignment.Center});
-                var transport=new StackPanel{Orientation=Orientation.Horizontal};body.Children.Add(transport);var controls=media.Playback?.Controls;
-                Action("Previous",()=>_=media.Command("previous"),transport,controls?.IsPreviousEnabled==true);
-                Action(media.Playback?.PlaybackStatus==Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing?"Pause":"Play",()=>_=media.Command("toggle"),transport,controls?.IsPlayPauseToggleEnabled==true);
-                Action("Next",()=>_=media.Command("next"),transport,controls?.IsNextEnabled==true);
-                if(media.Sessions.Count>1)foreach(var session in media.Sessions){var source=session;string name=StartCatalog.Current?.Apps.FirstOrDefault(app=>app.Target=="shell:AppsFolder\\"+source.SourceAppUserModelId)?.Name??source.SourceAppUserModelId;Action((source==media.Selected?"✓  ":"")+name,()=>media.Select(source));}
-                if(media.Error!=null)Text(media.Error,12);break;
+            case AppBarSection.Media:BuildMediaContents();break;
             case AppBarSection.Audio:
                 var audio=host.Audio;Text(audio.Output,14);if(audio.Error!=null)Text(audio.Error,12);
                 var volume=new Slider{Minimum=0,Maximum=100,Value=audio.Level,TickFrequency=1,IsSnapToTickEnabled=true,Margin=new Thickness(0,4,0,8),ToolTip="Master volume"};System.Windows.Automation.AutomationProperties.SetName(volume,"Master volume");volumeSlider=volume;
@@ -310,7 +313,7 @@ internal sealed class AdaptiveAppBarWindow:Window
                 muteButton=Action(audio.Muted?"Unmute":"Mute",()=>audio.Set(audio.Level,!audio.Muted),enabled:audio.Error==null);
                 foreach(var output in audio.Outputs){var device=output;Action((output.Name==audio.Output?"✓  ":"")+output.Name,()=>audio.SelectOutput(device));}
                 audioStatus=new TextBlock{Text=audio.Error??"Choose an audio output.",TextWrapping=TextWrapping.Wrap,FontSize=12};body.Children.Add(audioStatus);
-                Action("More sound options",()=>Open("ms-settings:sound"));break;
+                Action("More sound options",()=>Open("ms-settings:sound"));if(host.Media.Selected!=null)BuildMediaContents();break;
             case AppBarSection.Network:
                 networkStatus=new TextBlock{Text=host.Network.Status,FontSize=14,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,8)};body.Children.Add(networkStatus);var networkActions=new StackPanel{Orientation=Orientation.Horizontal};body.Children.Add(networkActions);
                 Action("Refresh",()=>_=host.Network.Refresh(true),networkActions);Action(host.Network.AccessDenied?"Location permission":"Network configuration",()=>Open(host.Network.AccessDenied?"ms-settings:privacy-location":"ms-settings:network-wifi"),networkActions);
@@ -338,13 +341,14 @@ internal sealed class AdaptiveAppBarWindow:Window
                 Text(calendarSelection.ToString("D",CultureInfo.CurrentCulture),14);BuildCalendar();break;
             case AppBarSection.Application:
                 var app=host.Applications.Current;Text(app?.Name??"Desktop",14);Text(app?.Title??"",12);
+                BuildApplicationMenuContents();
                 var contextual=new WrapPanel();body.Children.Add(contextual);
                 foreach(var capability in host.Capabilities.Actions.OrderBy(action=>action.Method=="Window"?1:0).Take(showAllActions?32:8)){var selected=capability;Action(capability.Label,()=>_=host.Capabilities.Execute(selected),contextual);}
                 if(host.Capabilities.Actions.Count>8)Action(showAllActions?"Fewer actions":"More actions",()=>{showAllActions=!showAllActions;BuildBody();});
                 Text(host.Capabilities.Status,12);Action("Refresh available actions",()=>host.Capabilities.Refresh());Text(host.Borderless.Feedback,12);
                 if(app!=null)Action("Exclude this app from borderless management",()=>{if(!Prefs.BorderlessExclusions.Contains(app.Path,StringComparer.OrdinalIgnoreCase))Prefs.BorderlessExclusions.Add(app.Path);Prefs.Save();host.Borderless.Update();BuildBody();});break;
         }
-        if(IsLoaded)FitExpansion();
+        if(IsLoaded&&refit)FitExpansion();
     }
     void BuildCalendar()
     {
@@ -385,10 +389,10 @@ internal sealed class AdaptiveAppBarWindow:Window
         if(audioStatus!=null)audioStatus.Text=host.Audio.Error??host.Audio.Output;
         if(!body.IsMouseOver&&!body.IsKeyboardFocusWithin)BuildBody();
     }
-    void MediaChanged(){media.ToolTip=host.Media.Title;if(current==AppBarSection.Media)BuildBody();}
+    void MediaChanged(){media.ToolTip=host.Media.Title;media.Visibility=ActualWidth<500||host.Media.Selected==null?Visibility.Collapsed:Visibility.Visible;if((current==AppBarSection.Media||current==AppBarSection.Audio)&&!body.IsMouseCaptureWithin)BuildBody();}
     void NetworkChanged(){network.ToolTip=host.Network.Status;if(networkStatus!=null)networkStatus.Text=host.Network.Status;if(current==AppBarSection.Network&&!body.IsKeyboardFocusWithin)BuildBody();}
     void BluetoothChanged(){bluetooth.ToolTip=host.Bluetooth.Status;bluetooth.Opacity=host.Bluetooth.Enabled?1:.55;if(current==AppBarSection.Bluetooth)BuildBody();}
-    void CapabilitiesChanged(){if(!closing&&current==AppBarSection.Application)BuildBody();}
+    void CapabilitiesChanged(){RefreshMenuCategories();if(!closing&&current==AppBarSection.Application){BuildBody();if(!host.Capabilities.MenuTransition&&!Testing)Dispatcher.BeginInvoke(new Action(()=>{if(closing||current!=AppBarSection.Application||host.Capabilities.MenuTransition)return;var own=new WindowInteropHelper(this).Handle;var foreground=Native.GetForegroundWindow();if(foreground!=IntPtr.Zero&&foreground!=own&&!IsOwnedBy(foreground,own))Collapse();}),DispatcherPriority.Input);}}
     async void ApplicationChanged()
     {
         var target=host.Applications.Current;application.Text=target==null?"Desktop":target.Name.Length>0?target.Name:target.Title;application.ToolTip=target?.Title;windowControls.Children.Clear();
@@ -405,7 +409,7 @@ internal sealed class AdaptiveAppBarWindow:Window
         if(iconIdentity!=nextIcon)
         {
             iconIdentity=nextIcon;int version=++appIconVersion;applicationIcon.Source=null;
-            if(target!=null){var icon=await ApplicationIdentity.Icon(target);if(closing||version!=appIconVersion)return;applicationIcon.Source=icon;}
+            if(target!=null){var icon=CustomIcons.Cached(target.IconTarget.Length>0?target.IconTarget:target.Path,"appbar")??await ApplicationIdentity.Icon(target);if(closing||version!=appIconVersion)return;applicationIcon.Source=icon;}
         }
         if(current==AppBarSection.Application)BuildBody();
         if(target?.Fullscreen==true&&sameMonitor){Collapse(false);Topmost=false;}else Topmost=true;

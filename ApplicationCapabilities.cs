@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,7 +12,7 @@ using System.Windows.Threading;
 
 namespace NewStart;
 internal enum CapabilityKind { Back,Forward,Refresh,Search,Save,Undo,Redo,Copy,Paste,Find,Minimise,Maximise,Restore,Close,Play,Pause,Previous,Next,Additional }
-internal sealed record ApplicationCapability(CapabilityKind Kind,string Label,string Method,string Source,int[]? RuntimeId=null,string Name="",int ControlType=0);
+internal sealed record ApplicationCapability(CapabilityKind Kind,string Label,string Method,string Source,int[]? RuntimeId=null,string Name="",int ControlType=0,string Category="",bool IsMenuCategory=false,string[]? MenuPath=null,int[]? CategoryRuntimeId=null,string CategoryName="");
 internal sealed record CapabilityRequest(long Window,uint ProcessId,long Started,int Caller,string Operation,ApplicationCapability? Action);
 internal sealed record CapabilityReply(List<ApplicationCapability> Actions,string Status,bool Success=false,int Inspected=0,string[]? Patterns=null);
 internal interface IApplicationCapabilityAdapter
@@ -62,9 +63,14 @@ internal static class CapabilityRegistry
 }
 internal sealed class ApplicationCapabilities:IDisposable
 {
+    [DllImport("user32.dll")]static extern bool AllowSetForegroundWindow(uint processId);
     readonly ActiveApplication applications;readonly AppBarMedia media;readonly DispatcherTimer debounce;CancellationTokenSource? pending,execution;bool disposed,executing;int generation;
     readonly Dictionary<(IntPtr,uint,long), (DateTime At,CapabilityReply Reply)> cache=new();DateTime lastDiscovery;
     internal IReadOnlyList<ApplicationCapability> Actions {get;private set;}=Array.Empty<ApplicationCapability>();
+    internal IReadOnlyList<ApplicationCapability> MenuCategories {get;private set;}=Array.Empty<ApplicationCapability>();
+    internal IReadOnlyList<ApplicationCapability> MenuActions {get;private set;}=Array.Empty<ApplicationCapability>();
+    internal string SelectedMenuCategory {get;private set;}="";
+    internal bool MenuTransition {get;private set;}
     internal ActiveWindow? Context {get;private set;}
     internal string Status {get;private set;}="Select an application to see available actions.";
     internal event Action? Changed;
@@ -79,10 +85,27 @@ internal sealed class ApplicationCapabilities:IDisposable
     {
         if(disposed)return;var next=applications.Current;
         if(next!=null&&Context!=null&&Key(next)==Key(Context)){bool changed=Context!=next;Context=next;if(changed){Compose(cache.GetValueOrDefault(Key(next)).Reply);Changed?.Invoke();Invalidate();}return;}
-        Context=next;pending?.Cancel();execution?.Cancel();++generation;debounce.Stop();Actions=Array.Empty<ApplicationCapability>();Status=next==null?"No application selected.":"Discovering available actions…";Changed?.Invoke();_=Discover(false);
+        Context=next;pending?.Cancel();execution?.Cancel();++generation;debounce.Stop();Actions=Array.Empty<ApplicationCapability>();MenuCategories=Array.Empty<ApplicationCapability>();MenuActions=Array.Empty<ApplicationCapability>();SelectedMenuCategory="";Status=next==null?"No application selected.":"Discovering available actions…";Changed?.Invoke();_=Discover(false);
     }
     void Invalidate(){if(disposed||Context==null||executing)return;cache.Remove(Key(Context));if(!debounce.IsEnabled){Compose(null);Status="Updating available actions…";Changed?.Invoke();debounce.Interval=TimeSpan.FromMilliseconds(Math.Max(450,2000-(DateTime.UtcNow-lastDiscovery).TotalMilliseconds));debounce.Start();}}
     internal void Refresh(){if(Context!=null)cache.Remove(Key(Context));_=Discover(true);}
+    internal async Task OpenMenu(ApplicationCapability category)
+    {
+        var app=Context;if(disposed||executing||app==null||!MenuCategories.Contains(category)||!applications.ValidTarget(app))return;
+        executing=true;MenuTransition=true;execution=new CancellationTokenSource();pending?.Cancel();debounce.Stop();int version=++generation;
+        SelectedMenuCategory=category.Category;MenuActions=Array.Empty<ApplicationCapability>();Status="Reading "+category.Label+" menu…";Changed?.Invoke();
+        try
+        {
+            var reply=await RunWorker(new(app.Handle.ToInt64(),app.ProcessId,app.Started,Environment.ProcessId,"openMenu",category),execution.Token,3500);
+            if(!disposed&&version==generation&&Context!=null&&Key(Context)==Key(app)){MenuActions=reply.Actions.Where(action=>!action.IsMenuCategory&&action.Category==SelectedMenuCategory).ToArray();Status=reply.Status;}
+        }
+        catch{if(!disposed&&version==generation&&Context!=null&&Key(Context)==Key(app))Status="The application did not expose this menu.";}
+        finally
+        {
+            execution?.Dispose();execution=null;executing=false;MenuTransition=false;
+            if(!disposed){Changed?.Invoke();if(Context!=null&&Key(Context)!=Key(app))_=Discover(false);}
+        }
+    }
     async Task Discover(bool force)
     {
         var app=Context;if(disposed||app==null||executing)return;
@@ -107,7 +130,9 @@ internal sealed class ApplicationCapabilities:IDisposable
     }
     void Compose(CapabilityReply? reply)
     {
-        var app=Context;if(app==null)return;var actions=new List<ApplicationCapability>(reply?.Actions??new());
+        var app=Context;if(app==null)return;
+        if(reply!=null){MenuCategories=reply.Actions.Where(action=>action.IsMenuCategory).GroupBy(action=>action.Category).Select(group=>group.First()).ToArray();if(!MenuCategories.Any(action=>action.Category==SelectedMenuCategory)){SelectedMenuCategory="";MenuActions=Array.Empty<ApplicationCapability>();}}
+        var actions=new List<ApplicationCapability>((reply?.Actions??new()).Where(action=>!action.IsMenuCategory&&action.Category.Length==0));
         if(!app.Fullscreen&&app.Started!=0)
         {
             if((app.Style&0x20000)!=0)actions.Add(new(CapabilityKind.Minimise,"Minimise","Window","Windows"));
@@ -121,8 +146,8 @@ internal sealed class ApplicationCapabilities:IDisposable
     internal static bool MatchesMedia(ActiveWindow app,string source)=>app.AppId.Length>0?string.Equals(app.AppId,source,StringComparison.OrdinalIgnoreCase):string.Equals(System.IO.Path.GetFileName(app.Path),source,StringComparison.OrdinalIgnoreCase);
     internal async Task Execute(ApplicationCapability action)
     {
-        var app=Context;if(disposed||executing||app==null||!Actions.Contains(action)||!applications.ValidTarget(app)){Status="The application changed. Select it again before using this action.";Changed?.Invoke();return;}
-        executing=true;execution=new CancellationTokenSource();pending?.Cancel();debounce.Stop();int version=++generation;
+        var app=Context;if(disposed||executing||app==null||!Actions.Contains(action)&&!MenuActions.Contains(action)||!applications.ValidTarget(app)){Status="The application changed. Select it again before using this action.";Changed?.Invoke();return;}
+        executing=true;MenuTransition=action.MenuPath!=null;execution=new CancellationTokenSource();pending?.Cancel();debounce.Stop();int version=++generation;
         try
         {
             if(action.Method=="Window")
@@ -145,11 +170,11 @@ internal sealed class ApplicationCapabilities:IDisposable
             }
             else
             {
-                var result=await RunWorker(new(app.Handle.ToInt64(),app.ProcessId,app.Started,Environment.ProcessId,"execute",action),execution.Token);
-                if(!disposed&&generation==version)Status=result.Status;
+                var result=await RunWorker(new(app.Handle.ToInt64(),app.ProcessId,app.Started,Environment.ProcessId,action.MenuPath!=null?"executeMenu":"execute",action),execution.Token,action.MenuPath!=null?3500:2600);
+                if(!disposed&&generation==version){Status=result.Status;if(action.MenuPath!=null&&action.Method=="Expand"&&result.Success)MenuActions=result.Actions;}
             }
-        }catch{if(!disposed)Status="The application did not accept the action.";}
-        finally{execution?.Dispose();execution=null;executing=false;if(!disposed){Changed?.Invoke();Invalidate();}}
+        }catch{if(!disposed&&generation==version&&Context!=null&&Key(Context)==Key(app))Status="The application did not accept the action.";}
+        finally{execution?.Dispose();execution=null;executing=false;MenuTransition=false;if(!disposed){Changed?.Invoke();Invalidate();}}
     }
     internal static async Task<CapabilityReply> RunWorker(CapabilityRequest request,CancellationToken cancellation,int timeout=2600)
     {
@@ -158,7 +183,11 @@ internal sealed class ApplicationCapabilities:IDisposable
         var info=new ProcessStartInfo(Environment.ProcessPath!){UseShellExecute=false,CreateNoWindow=true,WindowStyle=ProcessWindowStyle.Hidden,RedirectStandardInput=true,RedirectStandardOutput=true};info.ArgumentList.Add("--capability-worker");
         try
         {
-            using var worker=Process.Start(info)!;using var limit=CancellationTokenSource.CreateLinkedTokenSource(cancellation);limit.CancelAfter(timeout);
+            using var worker=Process.Start(info)!;
+            // Transfer only New Start's existing foreground permission to this one worker.
+            // Windows still rejects this call when the user is working in an unrelated app.
+            if(request.Operation!="discover")AllowSetForegroundWindow((uint)worker.Id);
+            using var limit=CancellationTokenSource.CreateLinkedTokenSource(cancellation);limit.CancelAfter(timeout);
             try{await worker.StandardInput.WriteLineAsync(JsonSerializer.Serialize(request));worker.StandardInput.Close();var read=worker.StandardOutput.ReadToEndAsync(limit.Token);await worker.WaitForExitAsync(limit.Token);return JsonSerializer.Deserialize<CapabilityReply>(await read)??new(new(),"No accessible actions reported.");}
             catch(OperationCanceledException){try{if(!worker.HasExited)worker.Kill(true);}catch{}return new(new(),cancellation.IsCancellationRequested?"Application changed.":"Accessibility provider timed out; window controls remain available.");}
         }catch{return new(new(),"Accessibility unavailable; window controls remain available.");}
@@ -178,27 +207,46 @@ internal static class CapabilityWorker
         try{var input=Console.ReadLine();if(input==null||input.Length>16000)return;var request=JsonSerializer.Deserialize<CapabilityRequest>(input);reply=request==null?new(new(),"Invalid request."):Process(request);}catch(Exception error){reply=new(new(),"Accessibility unavailable ("+error.GetType().Name+"); window controls remain available.");}
         Console.WriteLine(JsonSerializer.Serialize(reply));
     }
-    static bool SameWindow(CapabilityRequest request)=>ActiveApplication.Read(new IntPtr(request.Window)) is {} app&&app.ProcessId==request.ProcessId&&app.Started!=0&&app.Started==request.Started;
-    static bool ForegroundAllowed(CapabilityRequest request)
+    internal static bool SameWindow(CapabilityRequest request)=>ActiveApplication.Read(new IntPtr(request.Window)) is {} app&&app.ProcessId==request.ProcessId&&app.Started!=0&&app.Started==request.Started;
+    internal static bool ForegroundAllowed(CapabilityRequest request)
     {
         var foreground=Native.GetForegroundWindow();ApplicationIdentity.GetWindowThreadProcessId(foreground,out uint pid);
         return foreground==new IntPtr(request.Window)||pid==request.Caller;
     }
+    internal static bool Activate(CapabilityRequest request)
+    {
+        if(!SameWindow(request)||!ForegroundAllowed(request))return false;
+        var target=new IntPtr(request.Window);var previous=Native.GetForegroundWindow();if(previous==target)return true;
+        Native.SetForegroundWindow(target);
+        // Cross-input-queue activation completes on the target UI thread. Observe its
+        // acknowledgment, rather than treating the first foreground read as final.
+        var clock=Stopwatch.StartNew();
+        while(clock.ElapsedMilliseconds<200)
+        {
+            var current=Native.GetForegroundWindow();if(current==target)return SameWindow(request);
+            ApplicationIdentity.GetWindowThreadProcessId(current,out uint pid);
+            if(current!=IntPtr.Zero&&current!=previous&&pid!=request.Caller)return false;
+            Thread.Sleep(10);
+        }
+        return Native.GetForegroundWindow()==target&&SameWindow(request);
+    }
     static CapabilityReply Process(CapabilityRequest request)
     {
         if(!SameWindow(request))return new(new(),"The application window has changed.");
+        if(request.Operation is "openMenu" or "executeMenu")return ApplicationMenuDiscovery.Process(request);
         var window=new IntPtr(request.Window);var root=AutomationElement.FromHandle(window);if(root==null)return new(new(),"No accessibility provider.");
         var app=ApplicationIdentity.Enrich(ActiveApplication.Read(window)!);var adapters=CapabilityRegistry.Adapters.Where(adapter=>{try{return adapter.Supports(app);}catch{return false;}}).ToArray();
-        var found=new List<ApplicationCapability>();var patterns=new HashSet<string>();var queue=new Queue<(AutomationElement Element,int Depth)>();queue.Enqueue((root,0));var clock=Stopwatch.StartNew();int inspected=0;
+        var found=new List<ApplicationCapability>();var patterns=new HashSet<string>();var queue=new Queue<(AutomationElement Element,int Depth,bool MenuBar,bool TitleBar)>();queue.Enqueue((root,0,false,false));var clock=Stopwatch.StartNew();int inspected=0;
         var walker=TreeWalker.ControlViewWalker;
         while(queue.Count>0&&inspected<300&&clock.ElapsedMilliseconds<1600)
         {
-            var (element,depth)=queue.Dequeue();inspected++;
+            var (element,depth,menuBar,titleBar)=queue.Dequeue();inspected++;bool childrenMenuBar=menuBar,childrenTitleBar=titleBar;
             try
             {
                 var state=element.Current;
                 if(state.IsPassword)continue;
                 string name=state.Name??"";int type=state.ControlType.Id;
+                childrenTitleBar=titleBar||type==ControlType.TitleBar.Id;childrenMenuBar=!childrenTitleBar&&(menuBar||type==ControlType.MenuBar.Id);
                 if(state.IsEnabled&&!state.IsOffscreen&&name.Length is >0 and <100)
                 {
                     string method="";
@@ -213,6 +261,11 @@ internal static class CapabilityWorker
                     if(type==ControlType.Edit.Id&&state.IsKeyboardFocusable&&kind is CapabilityKind.Search or CapabilityKind.Find)method="Focus";
                     if(method.Length==0&&LegacyCapability.CanInvoke(new IntPtr(state.NativeWindowHandle),name)){method="MSAA";patterns.Add("MSAA default action");}
                     var id=element.GetRuntimeId();ApplicationCapability? action=null;
+                    if(menuBar&&!titleBar&&type==ControlType.MenuItem.Id&&element.TryGetCurrentPattern(ExpandCollapsePattern.Pattern,out var menuPattern)&&((ExpandCollapsePattern)menuPattern).Current.ExpandCollapseState!=ExpandCollapseState.LeafNode)
+                    {
+                        string label=CapabilityRegistry.Normalise(name);found.Add(new(CapabilityKind.Additional,label,"Expand","Application menu",id,name,type,label,true,null,id,name));
+                        childrenMenuBar=false;
+                    }
                     if(method.Length>0)
                     {
                         foreach(var adapter in adapters){try{action=adapter.Recognise(CapabilityRegistry.Normalise(name),type,method,id);if(action!=null){action=action with{Name=name};break;}}catch{}}
@@ -222,7 +275,7 @@ internal static class CapabilityWorker
                     if(request.Operation=="execute"&&request.Action is {} selected&&selected.RuntimeId!=null&&id.SequenceEqual(selected.RuntimeId)&&name==selected.Name&&type==selected.ControlType)
                     {
                         if(!SameWindow(request)||!ForegroundAllowed(request))return new(new(),"Focus changed; action cancelled.");
-                        Native.SetForegroundWindow(window);if(Native.GetForegroundWindow()!=window)return new(new(),"Windows did not allow activating this application.");
+                        if(!Activate(request))return new(new(),"Windows did not allow activating this application.");
                         if(!SameWindow(request)||!element.Current.IsEnabled)return new(new(),"The action is no longer available.");
                         // Verify the exact advertised method again. Never substitute keyboard input.
                         switch(selected.Method)
@@ -243,11 +296,11 @@ internal static class CapabilityWorker
                 if(depth<8)
                 {
                     var child=walker.GetFirstChild(element);int siblings=0;
-                    while(child!=null&&siblings++<70&&queue.Count+inspected<400){queue.Enqueue((child,depth+1));child=walker.GetNextSibling(child);}
+                    while(child!=null&&siblings++<70&&queue.Count+inspected<400){queue.Enqueue((child,depth+1,childrenMenuBar,childrenTitleBar));child=walker.GetNextSibling(child);}
                 }
             }catch(Exception error) when(error is not OutOfMemoryException){}
         }
         if(request.Operation=="execute")return new(new(),"The accessible control changed or is outside the bounded discovery region. Refresh actions.",false,inspected);
-        return new(found.GroupBy(action=>(action.Kind,action.Label)).Select(group=>group.First()).Take(24).ToList(),found.Count>0?"Available actions from this window":"No supported accessible commands found; window controls remain available.",false,inspected,patterns.ToArray());
+        return new(found.GroupBy(action=>(action.Kind,action.Label,action.IsMenuCategory)).Select(group=>group.First()).Take(40).ToList(),found.Count>0?"Available actions from this window":"No supported accessible commands found; window controls remain available.",false,inspected,patterns.ToArray());
     }
 }

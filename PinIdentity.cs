@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 namespace NewStart;
 internal static class PinIdentity
 {
+    internal static bool Matches(string pin,Native.TaskWindow window)=>string.Equals(Resolve(pin),window.Target,StringComparison.OrdinalIgnoreCase)||Matches(pin,window.Path);
     internal static bool Matches(string pin,string executable)
     {
         string target=Resolve(pin);if(string.Equals(target,executable,StringComparison.OrdinalIgnoreCase))return true;

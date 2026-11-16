@@ -14,5 +14,6 @@ internal static class AppBarBattery
     [DllImport("user32.dll")]internal static extern IntPtr RegisterPowerSettingNotification(IntPtr recipient,ref Guid setting,uint flags);
     [DllImport("user32.dll")]internal static extern bool UnregisterPowerSettingNotification(IntPtr handle);
     internal static BatteryReading Read(){bool success=GetSystemPowerStatus(out var status);return BatteryReading.FromStatus(success,status.Battery,status.Percent,status.AC);}
-    internal static readonly Guid[] Notifications={new("a7ad8041-b45a-4cae-87a3-eecbb468a9e1"),new("5d3e9a59-e9d5-4b00-a6bd-ff34ff516548")};
+    internal static TimeSpan? RemainingTime(){if(!GetSystemPowerStatus(out var status)||status.Life==uint.MaxValue)return null;return TimeSpan.FromSeconds(status.Life);}
+    internal static readonly Guid[] Notifications={new("a7ad8041-b45a-4cae-87a3-eecbb468a9e1"),new("5d3e9a59-e9d5-4b00-a6bd-ff34ff516548"),new("e00958c0-c213-4ace-ac77-fecced2eeea5"),new("245d8541-3943-4422-b025-13a784f679b7")};
 }

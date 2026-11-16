@@ -1,11 +1,16 @@
 using System;
 using System.Globalization;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Media;
 
 namespace NewStart;
 internal static class SurfaceAppearance
 {
+    internal static Preferences MenuPreferences(Preferences prefs,bool appBar,string? monitor=null)
+    {
+        var result=JsonSerializer.Deserialize<Preferences>(JsonSerializer.Serialize(prefs))!;result.StartTransparency=Transparency(prefs,appBar);result.MenuBlur=Blur(prefs,appBar);result.SurfaceColour=Background(prefs,appBar,monitor);result.Theme=WhiteInk(Effective(prefs,appBar,monitor))?2:1;return result;
+    }
     internal static bool TryHex(string? value,out Color colour)
     {
         colour=Colors.Black;string text=(value??"").Trim().TrimStart('#');

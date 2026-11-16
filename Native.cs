@@ -26,21 +26,23 @@ internal static class Native
     [DllImport("user32.dll")] internal static extern bool ShowWindowAsync(IntPtr hwnd,int command);
     [DllImport("user32.dll",SetLastError=true)]static extern bool PostMessage(IntPtr hwnd,uint message,IntPtr wParam,IntPtr lParam);
     internal static bool CloseWindow(IntPtr hwnd)=>PostMessage(hwnd,0x0112,new IntPtr(0xF060),IntPtr.Zero);
-    internal record TaskWindow(IntPtr Handle,string Title,string Path);
+    internal record TaskWindow(IntPtr Handle,string Title,string Path){internal string AppId {get;init;}="";internal uint ProcessId {get;init;}internal long Started {get;init;}internal string Target=>AppId.Length>0?"shell:AppsFolder\\"+AppId:Path;}
     internal static List<TaskWindow> Windows()
     {
         var list=new List<TaskWindow>();
         EnumWindows((h,_)=>{
-            if(!IsWindowVisible(h)||GetWindow(h,4)!=IntPtr.Zero) return true;
+            if(!IsWindowVisible(h)) return true;
             long extended=GetWindowLongPtr(h,-20).ToInt64();if((extended&0x08000080L)!=0)return true;
+            if(GetWindow(h,4)!=IntPtr.Zero&&(extended&0x40000)==0)return true;
             var className=new StringBuilder(256);GetClassName(h,className,256);
             if(className.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd")return true;
             if(DwmGetWindowAttribute(h,14,out int cloaked,4)==0&&cloaked!=0) return true;
             var title=new StringBuilder(512); GetWindowText(h,title,512); if(title.Length==0) return true;
             GetWindowThreadProcessId(h,out uint pid); if(pid==Environment.ProcessId) return true;
             var identity=ApplicationIdentity.ProcessInfo(pid);string path=identity.Path;
-            if(className.ToString()=="ApplicationFrameWindow"&&ActiveApplication.Read(h) is {} frame)path=ApplicationIdentity.Enrich(frame).Path;
-            if(path.Length>0)list.Add(new(h,title.ToString(),path));
+            string appId=identity.AppId;
+            if(className.ToString()=="ApplicationFrameWindow"&&ActiveApplication.Read(h) is {} frame){var content=ApplicationIdentity.Enrich(frame);path=content.Path;appId=content.AppId;}
+            if(path.Length>0||appId.Length>0)list.Add(new(h,title.ToString(),path){AppId=appId,ProcessId=pid,Started=identity.Started});
             return true;
         },IntPtr.Zero); return list;
     }
@@ -53,6 +55,7 @@ internal static class Native
         => WindowsShortcut(0x09);
     internal static bool ShowDesktop()
         => WindowsShortcut(0x44);
+    internal static bool FocusNotificationArea()=>WindowsShortcut(0x42); // Documented Windows + B, requested by a tray-button click.
     static bool WindowsShortcut(ushort shortcut)
     {
         Input Key(ushort key,bool up=false)=>new(){Type=1,Data=new InputUnion{Keyboard=new Keyboard{Key=key,Flags=up?2u:0u}}};

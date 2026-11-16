@@ -9,8 +9,14 @@ internal static class PinDragValidation
 {
     internal static void Run()
     {
+        var checks=new Dictionary<string,bool>();Run(checks);
+        Directory.CreateDirectory(Preferences.Folder);File.WriteAllText(Path.Combine(Preferences.Folder,"pin-drag-verification.json"),JsonSerializer.Serialize(checks));
+        if(checks.Values.Any(value=>!value))throw new InvalidOperationException("Pin drag validation failed.");
+    }
+    internal static void Run(Dictionary<string,bool> checks)
+    {
         string[] windows={@"C:\Apps\One.exe",@"C:\Apps\Two.exe"};var original=windows.ToArray();
-        var prefs=new Preferences();var model=new DockPins(prefs,()=>windows);var checks=new Dictionary<string,bool>();
+        var prefs=new Preferences();var model=new DockPins(prefs,()=>windows);
         model.Place(@"C:\Apps\Three.exe",1);checks["ExternalPinInsertedAtDropPosition"]=model.All().SequenceEqual(new[]{windows[0],@"C:\Apps\Three.exe",windows[1]});
         model.Place(windows[1],0);checks["ImportedPinCanBeReordered"]=model.All()[0]==windows[1];
         model.Place(@"c:\apps\THREE.exe",2);checks["DuplicateApplicationNotAdded"]=model.All().Count==3;
@@ -20,7 +26,5 @@ internal static class PinDragValidation
         var loaded=JsonSerializer.Deserialize<Preferences>(JsonSerializer.Serialize(prefs))!;
         checks["PinOrderSurvivesReload"]=new DockPins(loaded,()=>windows).All().SequenceEqual(model.All());
         checks["WindowsPinsUnchanged"]=windows.SequenceEqual(original);
-        Directory.CreateDirectory(Preferences.Folder);File.WriteAllText(Path.Combine(Preferences.Folder,"pin-drag-verification.json"),JsonSerializer.Serialize(checks));
-        if(checks.Values.Any(value=>!value))throw new InvalidOperationException("Pin drag validation failed.");
     }
 }

@@ -24,6 +24,8 @@ internal static class ApplicationIdentity
     [DllImport("user32.dll")]static extern IntPtr CopyIcon(IntPtr icon);
     [DllImport("user32.dll")]static extern bool DestroyIcon(IntPtr icon);
     static readonly ConcurrentDictionary<string,string> names=new(StringComparer.OrdinalIgnoreCase);
+    static readonly ConcurrentDictionary<string,string> stableTargets=new(StringComparer.OrdinalIgnoreCase);
+    internal static string StableTarget(string path)=>stableTargets.TryGetValue(path,out var target)?target:path;
     internal static (string Path,long Started,string AppId) ProcessInfo(uint pid)
     {
         var handle=OpenProcess(0x1000,false,pid);if(handle==IntPtr.Zero)return("",0,"");
@@ -33,6 +35,7 @@ internal static class ApplicationIdentity
             long started=GetProcessTimes(handle,out long created,out _,out _,out _)?DateTime.FromFileTimeUtc(created).Ticks:0;
             uint count=0;GetApplicationUserModelId(handle,ref count,null);string id="";
             if(count is >0 and <4096){var text=new StringBuilder((int)count);if(GetApplicationUserModelId(handle,ref count,text)==0)id=text.ToString();}
+            if(id.Length>0&&path.Length>0)stableTargets[path.ToString()]="shell:AppsFolder\\"+id;
             return(path.ToString(),started,id);
         }finally{CloseHandle(handle);}
     }
